@@ -1,8 +1,8 @@
 dependencies {
     // ProxyPlugin/RoutingProfile/RateLimitInfo come from the host's classpath at runtime (the
     // example-server's ProxyRegistry classloader already has :routing); compileOnly keeps this jar thin.
-    githubCompileOnly "intisy-ai:basekit:5.0.0:proxy-contracts"
-    githubTestImplementation "intisy-ai:basekit:5.0.0:proxy-contracts"
+    githubCompileOnly "forebay:basekit:5.0.0:proxy-contracts"
+    githubTestImplementation "forebay:basekit:5.0.0:proxy-contracts"
     // :proxy-contracts keeps api compileOnly, which does not propagate, so the seam types this
     // plugin names in its own signatures are declared again here.
     githubCompileOnly "intisy:bayonet:1.8.0:contract"
@@ -13,7 +13,7 @@ dependencies {
 jar { archiveVersion = "" }
 
 publishGithub {
-    owner = "intisy-ai"
+    owner = "forebay"
     repo = "claude-code-proxy"
     releaseName = "Claude Code proxy ${project.findProperty('artifact_version') ?: project.version}"
     artifacts {

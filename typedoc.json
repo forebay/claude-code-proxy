@@ -27,13 +27,13 @@
     "src/profiles/anthropic.ts"
   ],
   "name": "@intisy-ai/claude-code-proxy",
-  "sourceLinkTemplate": "https://github.com/intisy-ai/claude-code-proxy/blob/{gitRevision}/{path}#L{line}",
+  "sourceLinkTemplate": "https://github.com/forebay/claude-code-proxy/blob/{gitRevision}/{path}#L{line}",
   "externalSymbolLinkMappings": {
     "@intisy-ai/basekit/ir": {
-      "*": "https://github.com/intisy-ai/basekit"
+      "*": "https://github.com/forebay/basekit"
     },
     "@intisy-ai/basekit/proxy": {
-      "*": "https://github.com/intisy-ai/basekit"
+      "*": "https://github.com/forebay/basekit"
     }
   }
 }
