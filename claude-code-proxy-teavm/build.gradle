@@ -12,18 +12,18 @@ dependencies {
     // again below for the SPI types (RoutingProfile.Synth) ClaudeProxyJs references directly.
     implementation project(":claude-code-proxy-plugin")
     githubImplementation "forebay:basekit:5.0.0:proxy-contracts"
-    githubImplementation "intisy:bayonet:1.8.0:contract"
+    githubImplementation "weivel:java:1.8.0:contract"
     // :js-base's TeaVM service implementations (SimpleJsonCodec), reused rather than duplicated;
     // ClaudeProxyJs lives in the SAME package (io.github.intisy.ai.js) so it references them
     // unqualified, exactly like CoreProxyJs and every provider's own export surface do.
-    githubImplementation "intisy:bayonet:1.8.0:seam"
-    githubImplementation "intisy:bayonet:1.8.0:js-base"
+    githubImplementation "weivel:java:1.8.0:seam"
+    githubImplementation "weivel:java:1.8.0:js-base"
     // The emission annotations are SOURCE-retention, so nothing here reaches the bundle. A release
     // asset carries no transitive metadata, so the processor's own annotation types are named again
     // alongside the compile classpath's copy.
-    githubCompileOnly "intisy:bayonet:1.8.0:annotations"
-    githubAnnotationProcessor "intisy:bayonet:1.8.0:processor"
-    githubAnnotationProcessor "intisy:bayonet:1.8.0:annotations"
+    githubCompileOnly "weivel:java:1.8.0:annotations"
+    githubAnnotationProcessor "weivel:java:1.8.0:processor"
+    githubAnnotationProcessor "weivel:java:1.8.0:annotations"
     teavm teavm.libs.jsoApis
 }
 

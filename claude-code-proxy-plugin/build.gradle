@@ -5,8 +5,8 @@ dependencies {
     githubTestImplementation "forebay:basekit:5.0.0:proxy-contracts"
     // :proxy-contracts keeps api compileOnly, which does not propagate, so the seam types this
     // plugin names in its own signatures are declared again here.
-    githubCompileOnly "intisy:bayonet:1.8.0:contract"
-    githubTestImplementation "intisy:bayonet:1.8.0:contract"
+    githubCompileOnly "weivel:java:1.8.0:contract"
+    githubTestImplementation "weivel:java:1.8.0:contract"
 }
 
 // Version-less jar name so publishGithub's artifacts{} can reference it by a stable path.
