@@ -1,0 +1,19 @@
+{
+  "name": "zone-new-york-summer",
+  "input": {
+    "upstreamHeaders": {},
+    "now": 1000000000000,
+    "timeZone": "America/New_York",
+    "resetAt": 1752000000000
+  },
+  "expected": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json",
+      "retry-after": "752000000",
+      "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-reset": "1752000000"
+    },
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"You've hit your usage limit · resets at 2:40 PM EDT\"}}"
+  }
+}

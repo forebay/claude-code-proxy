@@ -1,0 +1,22 @@
+{
+  "name": "reset-header-not-a-number-is-ignored",
+  "input": {
+    "upstreamHeaders": {
+      "anthropic-ratelimit-unified-5h-reset": "soon"
+    },
+    "now": 1000000000000,
+    "timeZone": "UTC",
+    "resetAt": 1000000030000
+  },
+  "expected": {
+    "status": 429,
+    "headers": {
+      "anthropic-ratelimit-unified-5h-reset": "soon",
+      "content-type": "application/json",
+      "retry-after": "30",
+      "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-reset": "1000000030"
+    },
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"You've hit your usage limit · resets at 1:47 AM UTC\"}}"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "reset-in-the-past-says-try-again-later",
+  "input": {
+    "upstreamHeaders": {},
+    "now": 1000000000000,
+    "timeZone": "UTC",
+    "resetAt": 999999995000
+  },
+  "expected": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json",
+      "retry-after": "60",
+      "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-reset": "999999995"
+    },
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"You've hit your usage limit · try again later\"}}"
+  }
+}

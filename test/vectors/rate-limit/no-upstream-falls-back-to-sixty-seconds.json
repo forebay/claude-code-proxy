@@ -1,0 +1,18 @@
+{
+  "name": "no-upstream-falls-back-to-sixty-seconds",
+  "input": {
+    "upstreamHeaders": {},
+    "now": 1000000000000,
+    "timeZone": "UTC"
+  },
+  "expected": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json",
+      "retry-after": "60",
+      "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-reset": "1000000000"
+    },
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"You've hit your usage limit · try again later\"}}"
+  }
+}
