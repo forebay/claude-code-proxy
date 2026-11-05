@@ -31,7 +31,7 @@ describe("rateLimitReply", () => {
   it("writes the middle dot, which is not a dash", () => {
     const reply = rateLimitReply({ upstreamHeaders: {}, now: 1000, timeZone: "UTC" });
     expect(JSON.parse(reply.body).error.message).toContain("limit · try");
-    expect(reply.body).not.toMatch(/[–—]/);
+    expect(reply.body).not.toMatch(/[\u2013\u2014]/);
   });
 
   it("does not change the headers it was given", () => {
