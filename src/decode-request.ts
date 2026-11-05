@@ -1,5 +1,6 @@
-import type { DecodeRequestAnswer, IrFailure, WireRequest } from "@forebay/host";
-import { anthropicTranslator } from "anthropic-translator";
+import type { DecodeRequestAnswer, IrFailure, IrRequest, WireRequest } from "@forebay/host";
+import { anthropicTranslator, WIRE_HEADERS_EXTENSION } from "anthropic-translator";
+import { forwardableHeaders } from "./wire-headers.js";
 
 const ROUTED_METHOD = "POST";
 const ROUTED_PATH = "/v1/messages";
@@ -20,11 +21,17 @@ function parsedObject(body: string): unknown {
   return parsed;
 }
 
+function withClientHeaders(decoded: IrRequest, headers: Record<string, string>): IrRequest {
+  const forwardable = forwardableHeaders(headers);
+  if (Object.keys(forwardable).length === 0) return decoded;
+  return { ...decoded, extensions: { ...decoded.extensions, [WIRE_HEADERS_EXTENSION]: forwardable } };
+}
+
 /** Routes only `POST /v1/messages`; everything else goes to the upstream as it came. */
 export function decodeRequest(request: WireRequest): DecodeRequestAnswer {
   if (!isRouted(request)) return { passThrough: true };
   try {
-    return anthropicTranslator.decodeRequest(parsedObject(request.body));
+    return withClientHeaders(anthropicTranslator.decodeRequest(parsedObject(request.body)), request.headers);
   } catch (error) {
     return invalidRequest(`the request body is not a valid Messages API request: ${(error as Error).message}`);
   }

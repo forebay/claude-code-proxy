@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IrFailure, WireRequest } from "@forebay/host";
-import { anthropicTranslator } from "anthropic-translator";
+import { anthropicTranslator, WIRE_HEADERS_EXTENSION } from "anthropic-translator";
 import { contractProblems } from "../test/contract-schemas.js";
 import { decodeRequest } from "./decode-request.js";
 
@@ -15,6 +15,18 @@ describe("decodeRequest", () => {
     const answer = decodeRequest(wire({}));
     expect(answer).toEqual(anthropicTranslator.decodeRequest(MESSAGES_BODY));
     expect(contractProblems("DecodeRequestAnswer", answer)).toEqual([]);
+  });
+
+  it("leaves the client's headers on the request for the provider, without the ones that name the client or the connection", () => {
+    const headers = { Authorization: "Bearer client", "X-Api-Key": "k", Host: "h", "Content-Length": "3", "Accept-Encoding": "gzip", Connection: "keep-alive", "Transfer-Encoding": "chunked", "Anthropic-Beta": "client-beta", "Anthropic-Version": "2020-01-01", "User-Agent": "claude-cli" };
+    const answer = decodeRequest(wire({ headers })) as { extensions?: Record<string, unknown> };
+    expect(answer.extensions?.[WIRE_HEADERS_EXTENSION]).toEqual({ "anthropic-beta": "client-beta", "anthropic-version": "2020-01-01", "user-agent": "claude-cli" });
+    expect(contractProblems("DecodeRequestAnswer", answer)).toEqual([]);
+  });
+
+  it("adds no extension when no header is worth keeping", () => {
+    const answer = decodeRequest(wire({ headers: { Host: "h", Authorization: "Bearer client" } })) as { extensions?: Record<string, unknown> };
+    expect(answer.extensions?.[WIRE_HEADERS_EXTENSION]).toBeUndefined();
   });
 
   it("ignores the query", () => {
