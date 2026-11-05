@@ -1,9 +1,9 @@
 {
   "name": "claude-code-proxy",
-  "version": "2.2.0",
-  "description": "The Claude/Anthropic proxy layer (anthropicProfile) on top of the generic basekit proxy engine",
+  "version": "3.0.0",
+  "description": "The front door for the Anthropic Messages API, served by the shared host's session host.",
+  "main": "dist/plugin.js",
   "type": "module",
-  "main": "dist/index.js",
   "license": "MIT",
   "author": "intisy",
   "repository": {
@@ -12,7 +12,7 @@
   },
   "keywords": [
     "proxy",
-    "routing",
+    "front-door",
     "anthropic",
     "claude",
     "intisy",
@@ -28,23 +28,17 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "npm run emit:teavm && npm run build:teavm && npx tsc && node build.mjs && npx esbuild src/front-door-plugin.ts --bundle --platform=node --format=esm --external:@intisy-ai/basekit/proxy --external:@intisy-ai/basekit/ir --external:@intisy-ai/anthropic-translator --outfile=dist/front-door-plugin.js",
-    "build:teavm": "node node_modules/@intisy/bayonet/scripts/teavm-build.mjs --java-dir . --module :claude-code-proxy-teavm --out src/generated/anthropic-rate-limit.teavm.js",
-    "test": "npm run build && vitest run",
-    "prepublishOnly": "npm run build",
-    "emit:teavm": "node node_modules/@intisy/bayonet/scripts/emit-dts.mjs --java-dir . --module :claude-code-proxy-teavm --out src/generated",
-    "docs": "typedoc"
-  },
-  "dependencies": {
-    "@intisy-ai/anthropic-translator": "^1.1.0",
-    "@intisy-ai/basekit": "^5.0.0"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "npm run build && tsc --noEmit && vitest run",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@intisy/bayonet": "^1.8.0",
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.21.5",
-    "typedoc": "^0.28.20",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "@forebay/host": "file:./siblings/anthropic-translator/siblings/host",
+    "@types/node": "22.10.2",
+    "@weivel/typescript": "file:./siblings/anthropic-translator/siblings/host/siblings/typescript",
+    "ajv": "8.17.1",
+    "anthropic-translator": "file:./siblings/anthropic-translator",
+    "typescript": "5.7.2",
+    "vitest": "3.2.7"
   }
 }

@@ -1,18 +1,23 @@
 {
-  "$schema": "./node_modules/@intisy/bayonet/schema/plugin.schema.json",
+  "$schema": "https://weivel.github.io/model/plugin.schema.json",
   "id": "claude-code-proxy",
   "api": 1,
-  "entry": "dist/front-door-plugin.js",
+  "version": "3.0.0",
+  "entry": "dist/plugin.js",
+  "bundle": {
+    "entry": "src/plugin.ts"
+  },
   "displayName": "Claude Code proxy",
   "capabilities": [
     "front-door"
   ],
+  "config": {
+    "defaults": {
+      "upstream": "https://api.anthropic.com"
+    }
+  },
   "publish": {
-    "scopedOnly": true,
-    "jarModule": [
-      "claude-code-proxy-plugin"
-    ],
-    "jarPretest": true
+    "scopedOnly": true
   },
   "repo": {
     "role": "Anthropic and Claude Code proxy layer",

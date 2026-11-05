@@ -1,14 +1,10 @@
 node_modules/
 dist/
-src/generated/*.js
-src/generated/*.js.map
-build/
-*/build/
-.gradle/
+siblings/
+.idea/
 docs/
 .superpowers/
 graphify-out/
-.idea/
 
 # Generated on the default branch by the release readme job.
 README.md

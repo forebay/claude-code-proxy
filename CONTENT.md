@@ -1,42 +1,19 @@
-The Claude/Anthropic proxy layer on top of the generic `core-proxy` engine.
-It provides `anthropicProfile` (the config filename, tier order/fallback,
-tier regex, env-var prefix, default context/output limits, and the native
-Anthropic-shaped 429 response that the engine needs) to route requests for
-Claude Code. It is consumed by `claude-code-loader` as a published npm
-dependency and installed/run by the dashboard sidecar.
-This is a **library repo consumed as a published npm package**, the same
-treatment as `core` / `core-auth` / `core-loader` / `core-proxy`. Its release
-workflow ships `@intisy-ai/claude-code-proxy` alongside the JVM ProxyPlugin jar.
-This project carries **no generic engine code**; the routing engine
-(`:34567` daemon, tier→provider chains, rate-limit fallback, model rewrite,
-the node↔web request adapter) lives entirely in `core-proxy`, taken here as an
-npm dependency. `claude-code-proxy` only supplies the Claude-specific profile
-that parameterizes that engine.
+The front door for the Anthropic Messages API. It is a weivel plugin that provides the `front-door`
+capability, and the shared host's session host calls it: the host owns the listener, routing, retries
+and streaming, and this plugin owns only what is specific to the Anthropic wire format.
 
 ## Structure
 
-- `src/profiles/anthropic.ts`: `anthropicProfile()`, the Anthropic
-  `RoutingProfile` (config file, tier order/fallback, tier regex, env
-  prefix, default context/output, `nativeRateLimit`).
-- `src/index.ts`: the public barrel, re-exports the entire `core-proxy` API
-  plus `anthropicProfile`, so consumers import everything from one place.
-- `dist/`: compiled output (gitignored, never committed).
-
-## Usage
-
-```ts
-import { createProxyServer, makeDynamicResolver, anthropicProfile } from "./claude-code-proxy/dist/index.js";
-
-const profile = anthropicProfile();
-const resolveHandler = makeDynamicResolver(() =>
-  listProviders().map((p) => ({ provider: p.provider, handlerPath: p.handlerPath }))
-);
-const server = createProxyServer({ configDir, profile, port: 34567, resolveHandler });
-await server.listen();
-```
+- `src/profile.ts`: the routing profile (tiers, tier pattern, environment prefix, limits, upstream).
+- `src/decode-request.ts`: routes `POST /v1/messages` through `anthropic-translator`; answers an
+  Anthropic-shaped 400 for a body that is not a Messages request, and a pass-through for every other
+  method or path, which the host forwards to the upstream untouched.
+- `src/encode.ts`: encodes an IR response or one IR stream event back to the Anthropic wire format.
+- `src/rate-limit-reply.ts`: the Anthropic-shaped 429 the host answers when every route is limited.
+- `src/plugin.ts`: provides the capability; the `upstream` setting (default `https://api.anthropic.com`) is read from the plugin's configuration.
 
 ## Testing
 
-`npm run build && npx vitest run` builds the nested `core-proxy` engine
-first, then this project's own `src`, then runs the moved `anthropicProfile`
-tests plus a barrel smoke test asserting the re-exported surface.
+`npm test` builds, type-checks and runs vitest. The rate limit vectors under `test/vectors/rate-limit`
+were captured from the original implementation; every answer is also checked against the front-door
+contract schema, and the plugin is bundled with the host's `bundlePlugin` and run from the bundle alone.
