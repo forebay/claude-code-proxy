@@ -1,6 +1,6 @@
 import type { Profile } from "@forebay/host";
 
-export const PROVIDER_ID = "claude-code-auth";
+export const PROVIDER_ID = "claude-code-provider";
 
 export function profile(upstream: string): Profile {
   return {

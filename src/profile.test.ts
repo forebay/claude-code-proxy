@@ -7,13 +7,13 @@ describe("profile", () => {
     expect(contractProblems("ProfileAnswer", profile("https://api.anthropic.com"))).toEqual([]);
   });
 
-  it("names claude-code-auth, the plugin id of the provider, as the tier source", () => {
-    expect(profile("http://127.0.0.1:1").tierSourceProvider).toBe("claude-code-auth");
+  it("names claude-code-provider, the plugin id of the provider, as the tier source", () => {
+    expect(profile("http://127.0.0.1:1").tierSourceProvider).toBe("claude-code-provider");
   });
 
   it("carries the anthropic tiers, patterns and limits", () => {
     expect(profile("http://127.0.0.1:1")).toEqual({
-      tierSourceProvider: "claude-code-auth",
+      tierSourceProvider: "claude-code-provider",
       tierOrder: ["opus", "sonnet", "haiku", "fable"],
       tierFallback: ["opus", "sonnet", "haiku"],
       tierRegex: "^claude-([a-z]+)-\\d",
