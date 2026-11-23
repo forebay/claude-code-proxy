@@ -1,7 +1,7 @@
 {
   "format": 1,
   "importName": "claude-code-proxy",
-  "description": "The front door that speaks Claude Code's Anthropic API; the host owns the socket and the routing.",
+  "description": "The Claude Code proxy: a weivel plugin that listens for Claude Code and asks forebay-library's C for every decision.",
   "topics": [
     "ai",
     "ai-proxy",
@@ -15,32 +15,79 @@
   ],
   "dependencies": [
     {
-      "id": "github:1315506225",
-      "importName": "anthropic-translator",
-      "commit": "e7229c190a615a5a67bbe99dd7668e448b768a5c"
-    },
-    {
-      "id": "github:1443361890",
-      "importName": "host",
-      "commit": "ab55d183d61cfbbc4ff12f02ddd5b4c39b8cf542",
-      "path": "siblings/anthropic-translator/siblings/host"
-    },
-    {
-      "id": "github:1427176225",
-      "importName": "model",
-      "commit": "606988fb178b04d3f53835e6d982c09f31081ef1",
-      "path": "siblings/anthropic-translator/siblings/host/siblings/model"
-    },
-    {
       "id": "github:1427561829",
       "importName": "typescript",
-      "commit": "46bf872abbfcfe164294a9b3daa40fa0c26fff77",
-      "path": "siblings/anthropic-translator/siblings/host/siblings/typescript"
+      "commit": "95ec8e09c2027b3c95f9f33913c4c9fba0ce3b35"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "61bd395091915ee6727ecce2fff58915d4593806",
+      "path": "siblings/typescript/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "918148395b836d11483b91d4d3bb8bcee78da322",
+      "path": "siblings/typescript/siblings/standard"
+    },
+    {
+      "id": "github:1426141679",
+      "importName": "conformance",
+      "commit": "bc05534a8e8df412412a1d16dda55e1070875219",
+      "path": "siblings/typescript/siblings/conformance"
     },
     {
       "id": "github:1434954468",
       "importName": "forebay-library",
-      "commit": "6fd0245f7bfbca794fe8b832b48c1eeb043f32fb"
+      "commit": "7e93b5860c827a0266ec6139032230d784742fbf"
+    },
+    {
+      "id": "github:1434914426",
+      "importName": "library",
+      "commit": "951be978436913276dbf09f7bf53236904b69eff",
+      "path": "siblings/forebay-library/siblings/library"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "fba572ac6fc61ab719dd331a5409796c06ef23b4",
+      "path": "siblings/forebay-library/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "918148395b836d11483b91d4d3bb8bcee78da322",
+      "path": "siblings/forebay-library/siblings/standard"
+    },
+    {
+      "id": "github:1457141747",
+      "importName": "c",
+      "commit": "0d0ef67e66de32b40ef9c7851dcd8652e93af808",
+      "path": "siblings/forebay-library/siblings/c"
+    },
+    {
+      "id": "github:1434914426",
+      "importName": "library",
+      "commit": "9ec7588d3fc898e095be702a6632b4aafff72497"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "fba572ac6fc61ab719dd331a5409796c06ef23b4",
+      "path": "siblings/library/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "de9cf177177330653b6549641a1afc225c1726e3",
+      "path": "siblings/library/siblings/standard"
+    },
+    {
+      "id": "github:1457141747",
+      "importName": "c",
+      "commit": "0d0ef67e66de32b40ef9c7851dcd8652e93af808",
+      "path": "siblings/library/siblings/c"
     }
   ]
 }

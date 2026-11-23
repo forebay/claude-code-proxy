@@ -1,32 +1,50 @@
 {
-  "id": "claude-code-proxy",
   "api": 1,
+  "importName": "claude-code-proxy",
+  "id": "claude-code-proxy",
   "version": "3.0.0",
   "entry": "dist/plugin.js",
   "bundle": {
     "entry": "src/plugin.ts"
   },
   "displayName": "Claude Code proxy",
-  "capabilities": [
-    "front-door"
-  ],
+  "capabilities": {
+    "provides": [],
+    "consumes": ["forebay.provider"]
+  },
+  "services": {
+    "consumes": ["routing", "anthropic", "weivel.config", "weivel.paths", "weivel.log"]
+  },
   "config": {
     "defaults": {
-      "upstream": "https://api.anthropic.com"
+      "upstream": "https://api.anthropic.com",
+      "proxy": {
+        "port": 34567,
+        "placeholderAuthorization": "Bearer sk-ant-loader-proxy"
+      },
+      "routing": {
+        "tierSourceProvider": "claude-code-provider",
+        "tierOrder": { "1": "opus", "2": "sonnet", "3": "haiku", "4": "fable" },
+        "tierFallback": { "1": "opus", "2": "sonnet", "3": "haiku" },
+        "tierRegex": "^claude-([a-z]+)-\\d",
+        "nativeModelPattern": "^claude-",
+        "defaultContext": 200000,
+        "defaultOutput": 64000,
+        "loginCommand": "forebay-host action claude-code"
+      }
     }
   },
+  "access": [
+    { "kind": "port", "target": "setting:proxy.port", "mode": "listen", "why": "Claude Code sends its requests to the proxy here" },
+    { "kind": "network", "target": "api.anthropic.com", "mode": "connect", "why": "a request no provider serves passes through to the upstream setting, this host by default" }
+  ],
   "publish": {
     "scopedOnly": true
   },
   "repo": {
     "role": "Anthropic and Claude Code proxy layer",
     "category": "app-proxy",
-    "domains": [
-      "claude",
-      "anthropic"
-    ],
-    "tech": [
-      "typescript"
-    ]
+    "domains": ["claude", "anthropic"],
+    "tech": ["typescript"]
   }
 }
