@@ -1,7 +1,7 @@
 /**
  * The shapes weivel/typescript's binding gives the definitions this plugin calls: each operation one async method
- * taking its input parameters by name and answering its answer struct without its sizes, counts and storage. Only
- * the members this plugin reads or writes are named.
+ * taking its input parameters by name and answering its answer struct without its sizes, counts and storage, a NULL
+ * text left out and a NULL array answered empty. Only the members this plugin reads or writes are named.
  */
 
 export interface Pair {
@@ -31,18 +31,18 @@ export interface CatalogProvider {
 }
 
 export interface RoutingProfile {
-  readonly tier_source_provider: string | null;
-  readonly tier_order: readonly string[];
-  readonly tier_fallback: readonly string[];
-  readonly tier_regex: string | null;
-  readonly native_model_pattern: string | null;
-  readonly default_context: number;
-  readonly default_output: number;
+  readonly tier_source_provider: unknown;
+  readonly tier_order: unknown;
+  readonly tier_fallback: unknown;
+  readonly tier_regex: unknown;
+  readonly native_model_pattern: unknown;
+  readonly default_context: unknown;
+  readonly default_output: unknown;
 }
 
 export interface Slot {
   readonly slot: string;
-  readonly chain?: readonly unknown[];
+  readonly chain: readonly unknown[];
 }
 
 export interface LogLine {
@@ -70,7 +70,7 @@ export interface StepArgument {
   readonly model?: string | null;
   readonly pass_through: number;
   readonly refreshed: number;
-  readonly login_command: string;
+  readonly login_command: unknown;
   readonly settings_file: string;
   readonly report?: Report;
 }
@@ -79,23 +79,23 @@ export interface StepAnswer {
   readonly kind: number;
   readonly provider?: string;
   readonly model?: string;
-  readonly reply_kind?: number;
-  readonly status?: number;
+  readonly reply_kind: number;
+  readonly status: number;
   readonly message?: string;
-  readonly headers?: readonly Pair[];
-  readonly has_reset_at?: number;
-  readonly reset_at?: number;
+  readonly headers: readonly Pair[];
+  readonly has_reset_at: number;
+  readonly reset_at: number;
   readonly error_type?: string;
-  readonly log?: readonly LogLine[];
+  readonly log: readonly LogLine[];
   readonly walk?: Handle;
 }
 
 export interface ArrivalAnswer {
   readonly kind: number;
-  readonly status?: number;
+  readonly status: number;
   readonly content_type?: string;
   readonly body?: string;
-  readonly reply_kind?: number;
+  readonly reply_kind: number;
   readonly message?: string;
 }
 
@@ -103,41 +103,65 @@ export interface LimitsAnswer {
   readonly max_request_bytes: number;
   readonly too_large_status: number;
   readonly too_large_message: string;
-  readonly models_budget_milliseconds: number;
-  readonly rederive_interval_milliseconds: number;
   readonly refresh_every_milliseconds: number;
+  readonly too_large_reply_kind: number;
 }
 
 export interface FailureAnswer {
   readonly reply_kind: number;
   readonly status: number;
   readonly message: string;
-  readonly log?: readonly LogLine[];
+  readonly log: readonly LogLine[];
+}
+
+export interface CatalogArgument {
+  readonly event: number;
+  readonly now: number;
+  readonly asked: number;
+  readonly last_asked: number;
+  readonly asking: number;
+  readonly failed?: number;
+  readonly round_closed?: number;
+  readonly message?: string;
+  readonly unasked?: number;
+}
+
+export interface CatalogAnswer {
+  readonly action: number;
+  readonly budget_milliseconds: number;
+  readonly keep_last: number;
+  readonly rederive: number;
+  readonly log: readonly LogLine[];
+  readonly drop: number;
 }
 
 export interface Routing {
-  model_map(input: { argument: { profile: RoutingProfile; settings: unknown; providers: readonly CatalogProvider[] } }): Promise<{ slots?: readonly Slot[] }>;
-  model_entries(input: { argument: { profile: RoutingProfile; catalog: readonly CatalogProvider[] } }): Promise<{ entries?: readonly CatalogModel[] }>;
+  model_map(input: { argument: { profile: RoutingProfile; settings: unknown; providers: readonly CatalogProvider[] } }): Promise<{ slots: readonly Slot[] }>;
+  model_entries(input: { argument: { profile: RoutingProfile; catalog: readonly CatalogProvider[] } }): Promise<{ entries: readonly CatalogModel[] }>;
   step(input: { argument: StepArgument }): Promise<StepAnswer>;
   limits(input: Record<string, never>): Promise<LimitsAnswer>;
   pass_through(input: {
-    argument: { upstream: string; url: string; headers: readonly Pair[]; body_length: number; placeholder_authorization: string | null };
-  }): Promise<{ target: string; headers?: readonly Pair[] }>;
-  reply_headers(input: { argument: { headers: readonly Pair[]; rewritten: number } }): Promise<{ headers?: readonly Pair[] }>;
+    argument: { upstream: unknown; url: string; headers: readonly Pair[]; body_length: number; placeholder_authorization: unknown };
+  }): Promise<{ target: string; headers: readonly Pair[] }>;
+  reply_headers(input: { argument: { headers: readonly Pair[]; rewritten: number } }): Promise<{ headers: readonly Pair[] }>;
   arrival(input: { argument: { path: string; headers: readonly Pair[]; port: number } }): Promise<ArrivalAnswer>;
   port(input: { argument: { value: unknown; settings_file: string; failure?: { in_use: number; detail: string } } }): Promise<{ port: number; address: string }>;
-  failure(input: { argument: { reason: number; upstream?: string; detail: string } }): Promise<FailureAnswer>;
+  failure(input: { argument: { reason: number; upstream?: unknown; detail: string } }): Promise<FailureAnswer>;
+  catalog(input: { argument: CatalogArgument }): Promise<CatalogAnswer>;
 }
 
+/** Bytes C wrote and the status, content type and headers it answers they go out in. */
 export interface Body {
-  readonly bytes?: Uint8Array;
+  readonly bytes: Uint8Array;
+  readonly status: number;
+  readonly headers: readonly Pair[];
 }
 
 export interface DecodedRequest {
   readonly request?: { readonly model: string } & Record<string, unknown>;
-  readonly forwarded_headers?: readonly Pair[];
-  readonly reply_kind?: number;
-  readonly status?: number;
+  readonly forwarded_headers: readonly Pair[];
+  readonly reply_kind: number;
+  readonly status: number;
   readonly message?: string;
 }
 
@@ -152,7 +176,7 @@ export interface RateLimitArgument {
 
 export interface Reply {
   readonly status: number;
-  readonly headers?: readonly Pair[];
+  readonly headers: readonly Pair[];
   readonly body: string;
 }
 
@@ -165,7 +189,7 @@ export interface Anthropic {
   stream_encode_finish(input: { argument: { encoder: Handle; events: readonly unknown[] } }): Promise<Body>;
   error_envelope(input: { argument: { reply_kind: number; message: string } }): Promise<Body>;
   model_listing(input: { argument: { models: readonly CatalogModel[] } }): Promise<Body>;
-  model_lookup(input: { argument: { models: readonly CatalogModel[]; id: string } }): Promise<{ found: number; bytes?: Uint8Array }>;
+  model_lookup(input: { argument: { models: readonly CatalogModel[]; id: string } }): Promise<Body>;
   rate_limit_reply(input: { argument: RateLimitArgument }): Promise<Reply>;
 }
 
@@ -183,23 +207,19 @@ export interface ProviderNextAnswer {
   readonly failure?: string | null;
 }
 
-/** The `forebay.provider` contract as a provided implementation offers it, in the binding's shapes. */
+/**
+ * The `forebay.provider` contract as a provided implementation offers it, in the binding's shapes; `release_stream`
+ * is a release, which an implementation may leave out, and which the consumer calls whenever it is offered.
+ */
 export interface Provider {
   models(input: Record<string, never>): Promise<{ provider: CatalogProvider }>;
   handle(input: { argument: { request: unknown; headers: readonly Pair[] } }): Promise<ProviderHandleAnswer>;
   next(input: { stream: unknown }): Promise<ProviderNextAnswer>;
-}
-
-export interface SettingValue {
-  readonly kind: number;
-  readonly boolean?: number;
-  readonly number?: number;
-  readonly text?: string | null;
+  release_stream?(input: { stream: unknown }): unknown;
 }
 
 export interface Config {
-  get(input: { key: string }): Promise<{ value: SettingValue } | symbol>;
-  all(input: Record<string, never>): Promise<{ settings?: readonly { key: string; value: SettingValue }[] }>;
+  get_tree(input: { key: string }): Promise<unknown>;
 }
 
 export interface Paths {

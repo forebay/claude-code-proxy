@@ -19,9 +19,9 @@ function required<Service>(context: PluginContext, id: string): Service {
   return service;
 }
 
-function logWriter(log: Log): (lines: readonly LogLine[] | undefined) => void {
+function logWriter(log: Log): (lines: readonly LogLine[]) => void {
   return (lines) => {
-    for (const line of lines ?? []) {
+    for (const line of lines) {
       void log.write({ level: line.level === LOG_LEVEL.WARN ? WEIVEL_LOG.WARN : WEIVEL_LOG.INFO, message: line.message }).catch(() => undefined);
     }
   };
@@ -39,8 +39,12 @@ async function refusalAsError<Answer>(call: Promise<Answer>): Promise<Answer> {
 
 function listened(server: Server, port: number, address: string): Promise<NodeJS.ErrnoException | undefined> {
   return new Promise((resolve) => {
-    server.once("error", (error: NodeJS.ErrnoException) => resolve(error));
-    server.listen(port, address, () => resolve(undefined));
+    const failed = (error: NodeJS.ErrnoException): void => resolve(error);
+    server.once("error", failed);
+    server.listen(port, address, () => {
+      server.off("error", failed);
+      resolve(undefined);
+    });
   });
 }
 
@@ -62,15 +66,13 @@ async function started(context: PluginContext): Promise<Running> {
   const writeLog = logWriter(required<Log>(context, "weivel.log"));
   const limits = await routing.limits({});
   const providers = (): Provider[] => context.capabilities.all(context.capability<Provider>(PROVIDER_CAPABILITY));
-  const warn = (message: string): void => writeLog([{ level: LOG_LEVEL.WARN, message }]);
-  const catalog = new Catalog({ providers, routing, profile: settings.profile, settings: settings.record, limits, warn, now: Date.now });
+  const catalog = new Catalog({ providers, routing, profile: settings.profile, settings: settings.record, refreshEveryMilliseconds: limits.refresh_every_milliseconds, writeLog, now: Date.now });
   const proxy: { -readonly [Key in keyof Proxy]: Proxy[Key] } = { routing, anthropic, settings, port: 0, limits, catalog, writeLog };
   const server = createServer((incoming, response) => void serve(proxy, incoming, response));
   try {
     proxy.port = await listening(routing, settings, server);
   } catch (error) {
     catalog.stop();
-    warn(error instanceof Error ? error.message : String(error));
     throw error;
   }
   return { server, catalog };

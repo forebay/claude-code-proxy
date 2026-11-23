@@ -10,12 +10,21 @@ interface Context {
   service(id: string): unknown;
   capability(id: string): unknown;
   provide(capability: unknown, implementation: object): void;
-  readonly services: { get(service: unknown): unknown };
+  readonly services: { get(service: unknown): unknown; register(service: unknown, object: object): unknown };
 }
 
+/** A stream the test provider answers: its events, how it ends, and, for one that hangs, what its release settles. */
 interface Stream {
   readonly events: object[];
   readonly failure: string | undefined;
+  readonly hangs: boolean;
+  released: boolean;
+  wake?: () => void;
+}
+
+/** What the test reads of the provider through the service it registers. */
+interface Probe {
+  released: number;
 }
 
 const TEXT = 1;
@@ -43,6 +52,10 @@ function streamed(model: string, text: string): object[] {
   ];
 }
 
+function stream(events: object[], failure: string | undefined, hangs = false): object {
+  return { kind: STREAM, stream: { events, failure, hangs, released: false } satisfies Stream };
+}
+
 function handled(mode: string, name: string, request: { model: string }): object {
   if (mode === "plain") {
     return { kind: RESPONSE, response: { id: "msg_test", model: request.model, stop_reason: "end_turn", content: [{ kind: 1, text: `served by ${name}` }] } };
@@ -55,8 +68,18 @@ function handled(mode: string, name: string, request: { model: string }): object
     ];
     return { kind: FAILURE, failure: { status: 429, headers, body: `{"limited":"${name}"}` } };
   }
-  if (mode === "stream") return { kind: STREAM, stream: { events: streamed(request.model, `streamed by ${name}`), failure: undefined } };
-  return { kind: STREAM, stream: { events: streamed(request.model, "partial").slice(0, 3), failure: `${name} broke mid stream` } };
+  if (mode === "stream") return stream(streamed(request.model, `streamed by ${name}`), undefined);
+  if (mode === "stream-fails-first") return stream([], `${name} broke before its first event`);
+  if (mode === "hang") return stream(streamed(request.model, "first").slice(0, 3), undefined, true);
+  return stream(streamed(request.model, "partial").slice(0, 3), `${name} broke mid stream`);
+}
+
+async function next(input: { stream: Stream }): Promise<object> {
+  const { stream } = input;
+  const event = stream.events.shift();
+  if (event !== undefined) return { kind: EVENT, event };
+  if (stream.hangs && !stream.released) await new Promise<void>((resolve) => (stream.wake = resolve));
+  return stream.failure === undefined ? { kind: END } : { kind: STREAM_FAILED, failure: stream.failure };
 }
 
 export default {
@@ -65,6 +88,8 @@ export default {
     const mode = await text(config, "mode");
     const name = await text(config, "name");
     const model = await text(config, "model");
+    const probe: Probe = { released: 0 };
+    context.services.register(context.service(`${name}:probe`), probe);
     context.provide(context.capability("forebay.provider"), {
       async models() {
         return { provider: { provider: name, models: [{ id: model, name: model }], has_ranking: 0, default_model: model } };
@@ -72,10 +97,11 @@ export default {
       async handle(input: { argument: { request: { model: string } } }) {
         return handled(mode, name, input.argument.request);
       },
-      async next(input: { stream: Stream }) {
-        const event = input.stream.events.shift();
-        if (event !== undefined) return { kind: EVENT, event };
-        return input.stream.failure === undefined ? { kind: END } : { kind: STREAM_FAILED, failure: input.stream.failure };
+      next,
+      release_stream(input: { stream: Stream }) {
+        input.stream.released = true;
+        input.stream.wake?.();
+        probe.released += 1;
       },
     });
   },

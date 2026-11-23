@@ -1,8 +1,6 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import type { Pair } from "./services.js";
 
-const JSON_TYPE = { "content-type": "application/json" };
-
 /** The body did not fit under the limit C set; the rest of it is still unread. */
 export class BodyTooLarge extends Error {}
 
@@ -10,8 +8,8 @@ export function pairsOf(headers: IncomingHttpHeaders): Pair[] {
   return Object.entries(headers).flatMap(([name, value]) => (value === undefined ? [] : [{ name, value: Array.isArray(value) ? value.join(", ") : value }]));
 }
 
-export function headersOf(pairs: readonly Pair[] | undefined): Record<string, string> {
-  return Object.fromEntries((pairs ?? []).map((pair) => [pair.name, pair.value]));
+export function headersOf(pairs: readonly Pair[]): Record<string, string> {
+  return Object.fromEntries(pairs.map((pair) => [pair.name, pair.value]));
 }
 
 /** The whole body, refused with BodyTooLarge as soon as it is known to pass `maxBytes`. */
@@ -38,16 +36,20 @@ export function bodyOf(incoming: IncomingMessage, maxBytes: number): Promise<Buf
   });
 }
 
-export function writeJson(response: ServerResponse, status: number, body: Uint8Array | string | undefined): void {
+/** Sends a whole reply with the status and headers C answered; a reply after bytes already went out ends the connection. */
+export function writeBody(response: ServerResponse, status: number, headers: readonly Pair[], bytes: Uint8Array | string): void {
   if (response.headersSent) {
     response.destroy();
     return;
   }
-  response.writeHead(status, JSON_TYPE);
-  response.end(body ?? "");
+  response.writeHead(status, headersOf(headers));
+  response.end(bytes);
 }
 
-/** @implNote The rest of the body is read and dropped first, since closing over unread data resets the connection and loses the reply. */
+/**
+ * @implNote The rest of the body is read and dropped first, since closing over unread data resets the connection and
+ * loses the reply; the connection is then closed, as the host could not read the request to its end in time.
+ */
 export function drainedUnread(incoming: IncomingMessage, response: ServerResponse): Promise<void> {
   response.setHeader("connection", "close");
   if (incoming.readableEnded) return Promise.resolve();

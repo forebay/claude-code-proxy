@@ -1,10 +1,9 @@
 import type { ServerResponse } from "node:http";
 import { IR_EVENT_ERROR, PROVIDER_NEXT, REPORT } from "./kinds.js";
-import type { Anthropic, Handle, Provider, ProviderNextAnswer, Report } from "./services.js";
+import type { Anthropic, Body, Handle, Provider, ProviderNextAnswer, Report } from "./services.js";
+import { headersOf } from "./wire.js";
 
-const STREAM_HEADERS = { "content-type": "text/event-stream", "cache-control": "no-cache" };
-
-/** One request's stream to the client: the encoder C keeps its state in, and whether a byte went out yet. */
+/** One request's stream to the client: the encoder C keeps one provider's stream state in, and whether a byte went out. */
 export class Relay {
   readonly #anthropic: Anthropic;
   readonly #response: ServerResponse;
@@ -21,9 +20,9 @@ export class Relay {
   /** Reads a provider's stream to its end or its failure, answering the report for `step`, or undefined once the client went away. */
   async relayed(provider: Provider, stream: unknown): Promise<Report | undefined> {
     try {
-      for (;;) {
-        const next = await nextOf(provider, stream);
-        if (this.#signal.aborted) return undefined;
+      while (!this.#signal.aborted) {
+        const next = await this.#nextOf(provider, stream);
+        if (next === undefined) return undefined;
         if (next.kind === PROVIDER_NEXT.EVENT) {
           await this.#written((encoder) => this.#anthropic.stream_encode({ argument: { encoder, events: [next.event] } }));
         } else if (next.kind === PROVIDER_NEXT.END) {
@@ -31,11 +30,13 @@ export class Relay {
           this.#response.end();
           return { kind: REPORT.STREAMED };
         } else {
+          if (!this.#wrote) this.release();
           return { kind: REPORT.STREAM_FAILED, after_bytes: this.#wrote ? 1 : 0, message: next.failure ?? null };
         }
       }
+      return undefined;
     } finally {
-      released(stream);
+      released(provider, stream);
     }
   }
 
@@ -49,20 +50,30 @@ export class Relay {
     }
   }
 
-  get wrote(): boolean {
-    return this.#wrote;
-  }
-
   release(): void {
     this.#encoder?.release();
     this.#encoder = undefined;
   }
 
-  async #written(encode: (encoder: Handle) => Promise<{ bytes?: Uint8Array }>): Promise<void> {
+  /** The provider's next answer, or undefined once the client went away while it was awaited. */
+  async #nextOf(provider: Provider, stream: unknown): Promise<ProviderNextAnswer | undefined> {
+    let abandon = (): void => undefined;
+    const gone = new Promise<undefined>((resolve) => (abandon = () => resolve(undefined)));
+    this.#signal.addEventListener("abort", abandon, { once: true });
+    const next = provider.next({ stream }).catch((error: unknown) => ({ kind: PROVIDER_NEXT.FAILURE, failure: error instanceof Error ? error.message : String(error) }));
+    try {
+      const answer = await Promise.race([next, gone]);
+      return this.#signal.aborted ? undefined : answer;
+    } finally {
+      this.#signal.removeEventListener("abort", abandon);
+    }
+  }
+
+  async #written(encode: (encoder: Handle) => Promise<Body>): Promise<void> {
     this.#encoder ??= await this.#anthropic.stream_encoder_open({});
     const body = await encode(this.#encoder);
-    if (body.bytes === undefined || body.bytes.length === 0) return;
-    if (!this.#wrote) this.#response.writeHead(200, STREAM_HEADERS);
+    if (body.bytes.length === 0) return;
+    if (!this.#wrote) this.#response.writeHead(body.status, headersOf(body.headers));
     this.#wrote = true;
     if (!this.#response.write(body.bytes)) await this.#drained();
   }
@@ -81,16 +92,12 @@ export class Relay {
   }
 }
 
-async function nextOf(provider: Provider, stream: unknown): Promise<ProviderNextAnswer> {
-  try {
-    return await provider.next({ stream });
-  } catch (error) {
-    return { kind: PROVIDER_NEXT.FAILURE, failure: error instanceof Error ? error.message : String(error) };
+/** Frees the stream through the contract's `release_stream` when the provider offers it, or a handle's own release. */
+function released(provider: Provider, stream: unknown): void {
+  if (typeof provider.release_stream === "function") {
+    provider.release_stream({ stream });
+    return;
   }
-}
-
-/** A stream a C provider answered is a handle the binding frees; one a TypeScript provider answered is its own value. */
-function released(stream: unknown): void {
   const release = (stream as { release?: unknown } | null)?.release;
   if (typeof release === "function") release.call(stream);
 }

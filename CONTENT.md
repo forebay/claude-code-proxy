@@ -9,18 +9,19 @@ capability by id through its context, and reads its settings, folders and log th
 ## Structure
 
 - `src/plugin.ts`: activation; listens where `routing.port` answers for the `proxy.port` setting, and on a failed
-  listen is refused with `routing.port`'s own refusal, written to the log.
+  listen is refused with `routing.port`'s own refusal, which the run publishes as the plugin's refusal.
 - `src/serve.ts`: one request: `routing.arrival`, then `anthropic.route_request`; the model routes are answered from
   `routing.model_entries` and `anthropic.model_listing` or `model_lookup`, a messages body is decoded by
   `anthropic.decode_request`, and every other request is walked as a pass-through.
 - `src/walk.ts`: the loop, `routing.step` until it answers done, performing each step and reporting how it went.
-- `src/relay.ts`: a provider's stream through `anthropic.stream_encode`, and the error event C names when it fails
-  after bytes went out.
+- `src/relay.ts`: a provider's stream through `anthropic.stream_encode`, one encoder per provider, and the error event
+  C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
+  offers one, a client going away included.
 - `src/pass-through.ts`: `routing.pass_through` and `reply_headers`, and `routing.failure` for an unreachable upstream.
-- `src/catalog.ts`: the providers' models, asked within the budget and intervals `routing.limits` answers, and the
-  model map `routing.model_map` derives from them and the stored settings.
-- `src/settings.ts`: the settings as one record; a list is declared as a record keyed by position, since
-  `weivel.config` offers no list kind.
+- `src/catalog.ts`: the providers' models, kept as `routing.catalog` decides each event (the implementations changing,
+  a step finding no model, the period, an answer, a round closing, a failed derivation); it holds the timer, the
+  asks, the models and the facts of the rounds, and the model map `routing.model_map` derives.
+- `src/settings.ts`: each setting whole through `weivel.config`'s `get_tree`.
 - `src/zone.ts`: the machine's zone offset and short name at an instant, from `Intl`, which C names a reset in.
 
 ## Configuration
@@ -28,7 +29,7 @@ capability by id through its context, and reads its settings, folders and log th
 `plugin.json`'s `config.defaults` hold `upstream`, `proxy.port` (34567) and the placeholder credential, and the
 routing profile under `routing`: the tier source provider, tier order and fallback, the tier pattern, the native
 model pattern, the default limits and the login command the no-model reply names. A stored model map goes under
-`routing.modelMap`, each chain a record keyed by position.
+`routing.modelMap`, each slot a list of `{provider, model}`.
 
 ## Testing
 

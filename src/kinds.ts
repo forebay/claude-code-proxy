@@ -20,6 +20,8 @@ export const IR_EVENT_ERROR = 10;
 
 export const LOG_LEVEL = { INFO: 1, WARN: 2 } as const;
 
-export const SETTING = { NONE: 0, TEXT: 1, NUMBER: 2, BOOLEAN: 3 } as const;
+export const CATALOG_EVENT = { PROVIDERS_CHANGED: 1, NO_MODEL: 2, PERIOD: 3, ANSWERED: 4, ROUND_CLOSED: 5, DERIVE_FAILED: 6 } as const;
+
+export const CATALOG_ACTION = { NOTHING: 1, ASK: 2, WAIT: 3 } as const;
 
 export const WEIVEL_LOG = { INFO: 3, WARN: 4 } as const;

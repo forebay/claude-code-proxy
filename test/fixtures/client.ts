@@ -29,3 +29,16 @@ export function sent(port: number, what: Sent): Promise<Answer> {
     outgoing.end(what.body);
   });
 }
+
+/** Sends `what` and goes away once the first bytes of the answer arrived, answering when it has. */
+export function abandonedAfterFirstBytes(port: number, what: Sent): Promise<void> {
+  return new Promise((resolve) => {
+    const outgoing = request(
+      { host: "127.0.0.1", port, method: what.method ?? "POST", path: what.path, headers: { "content-type": "application/json", ...what.headers } },
+      (incoming) => incoming.once("data", () => outgoing.destroy()),
+    );
+    outgoing.on("error", () => undefined);
+    outgoing.on("close", () => resolve());
+    outgoing.end(what.body);
+  });
+}

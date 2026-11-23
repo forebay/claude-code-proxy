@@ -2,9 +2,9 @@ import type { ServerResponse } from "node:http";
 import type { Catalog, Snapshot } from "./catalog.js";
 import { PROVIDER_HANDLE, REPLY, REPORT, STEP } from "./kinds.js";
 import { Relay } from "./relay.js";
-import type { Anthropic, Handle, Pair, ProviderHandleAnswer, Report, Routing, StepAnswer, StepArgument } from "./services.js";
+import type { Anthropic, Handle, LogLine, Pair, Provider, ProviderHandleAnswer, Report, Routing, StepAnswer, StepArgument } from "./services.js";
 import type { ProxySettings } from "./settings.js";
-import { headersOf, writeJson } from "./wire.js";
+import { writeBody } from "./wire.js";
 import { zoneAt } from "./zone.js";
 
 export interface Walker {
@@ -12,7 +12,7 @@ export interface Walker {
   readonly anthropic: Anthropic;
   readonly settings: ProxySettings;
   readonly catalog: Catalog;
-  readonly writeLog: (lines: StepAnswer["log"]) => void;
+  readonly writeLog: (lines: readonly LogLine[]) => void;
   readonly passThrough: () => Promise<void>;
 }
 
@@ -60,61 +60,57 @@ async function stepped(exchange: Exchange, walk?: Handle, report?: Report): Prom
   return answer;
 }
 
-async function handled(exchange: Exchange, answer: StepAnswer): Promise<ProviderHandleAnswer> {
-  const provider = exchange.snapshot.byName.get(answer.provider ?? "");
-  if (provider === undefined) throw new Error(`step named ${answer.provider}, which the proxy did not hand it`);
+async function handled(exchange: Exchange, provider: Provider, model: string): Promise<ProviderHandleAnswer> {
   try {
-    return await provider.handle({ argument: { request: { ...exchange.request.ir, model: answer.model }, headers: exchange.request.headers } });
+    return await provider.handle({ argument: { request: { ...exchange.request.ir, model }, headers: exchange.request.headers } });
   } catch (error) {
     return { kind: PROVIDER_HANDLE.THROWN, message: messageOf(error) };
   }
 }
 
-/** Calls the provider step named and answers the report of how it went, or undefined once the client went away. */
+function failureReport(failure: NonNullable<ProviderHandleAnswer["failure"]>): Report {
+  const { status, headers, has_retry_after, retry_after_milliseconds } = failure;
+  const given = Object.entries({ headers, has_retry_after, retry_after_milliseconds }).filter(([, value]) => value !== undefined);
+  return { kind: REPORT.FAILURE, status, now: Date.now(), ...Object.fromEntries(given) };
+}
+
+/**
+ * Calls the provider step named, one of the providers this walk handed `step`, and answers the report of how it went,
+ * or undefined once the client went away.
+ */
 async function called(exchange: Exchange, answer: StepAnswer): Promise<Report | undefined> {
-  const served = await handled(exchange, answer);
+  const provider = exchange.snapshot.byName.get(answer.provider!)!;
+  const served = await handled(exchange, provider, answer.model!);
   if (served.kind === PROVIDER_HANDLE.RESPONSE) {
     const body = await exchange.walker.anthropic.encode_response({ argument: { response: served.response } });
-    writeJson(exchange.response, 200, body.bytes);
+    writeBody(exchange.response, body.status, body.headers, body.bytes);
     return { kind: REPORT.RESPONSE };
   }
-  if (served.kind === PROVIDER_HANDLE.FAILURE && served.failure !== undefined) {
-    const { failure } = served;
-    exchange.failureBody = failure.body ?? "";
-    const retry = failure.has_retry_after === 1 ? { has_retry_after: 1, retry_after_milliseconds: failure.retry_after_milliseconds ?? 0 } : {};
-    return { kind: REPORT.FAILURE, status: failure.status, headers: failure.headers ?? [], now: Date.now(), ...retry };
+  if (served.kind === PROVIDER_HANDLE.FAILURE) {
+    exchange.failureBody = served.failure!.body ?? "";
+    return failureReport(served.failure!);
   }
-  if (served.kind === PROVIDER_HANDLE.STREAM) {
-    const provider = exchange.snapshot.byName.get(answer.provider ?? "");
-    return provider === undefined ? undefined : exchange.relay.relayed(provider, served.stream);
-  }
+  if (served.kind === PROVIDER_HANDLE.STREAM) return exchange.relay.relayed(provider, served.stream);
   return { kind: REPORT.THROWN, message: served.message ?? null };
 }
 
 async function rateLimited(exchange: Exchange, answer: StepAnswer): Promise<void> {
   const now = Date.now();
-  const hasReset = answer.has_reset_at === 1;
-  const reset = hasReset ? (answer.reset_at ?? now) : now;
-  const argument = { upstream_headers: answer.headers ?? [], has_reset_at: hasReset ? 1 : 0, reset_at: hasReset ? reset : 0, now, ...zoneAt(reset) };
+  const reset = answer.has_reset_at === 1 ? answer.reset_at : now;
+  const argument = { upstream_headers: answer.headers, has_reset_at: answer.has_reset_at, reset_at: answer.reset_at, now, ...zoneAt(reset) };
   const reply = await exchange.walker.anthropic.rate_limit_reply({ argument });
-  exchange.response.writeHead(reply.status, headersOf(reply.headers));
-  exchange.response.end(reply.body);
+  writeBody(exchange.response, reply.status, reply.headers, reply.body);
 }
 
 async function replied(exchange: Exchange, answer: StepAnswer): Promise<void> {
   const { response } = exchange;
-  if (response.headersSent) {
-    response.destroy();
-    return;
-  }
   if (answer.reply_kind === REPLY.RATE_LIMITED) return rateLimited(exchange, answer);
   if (answer.reply_kind === REPLY.PROVIDER_FAILURE) {
-    response.writeHead(answer.status ?? 502, headersOf(answer.headers));
-    response.end(exchange.failureBody ?? "");
+    writeBody(response, answer.status, answer.headers, exchange.failureBody!);
     return;
   }
-  const body = await exchange.walker.anthropic.error_envelope({ argument: { reply_kind: answer.reply_kind ?? REPLY.PROXY_ERROR, message: answer.message ?? "" } });
-  writeJson(response, answer.status ?? 500, body.bytes);
+  const body = await exchange.walker.anthropic.error_envelope({ argument: { reply_kind: answer.reply_kind, message: answer.message! } });
+  writeBody(response, answer.status, body.headers, body.bytes);
 }
 
 /** Performs one step; answers the report it owes `step`, or undefined when the walk ends here. */
@@ -146,7 +142,7 @@ export async function walk(walker: Walker, request: Request, response: ServerRes
   try {
     while (answer.kind !== STEP.DONE && !signal.aborted) {
       if (answer.kind === STEP.REFRESH_MODELS) {
-        exchange.snapshot = await walker.catalog.refresh();
+        exchange.snapshot = await walker.catalog.refreshed();
         exchange.refreshed = true;
         answer.walk?.release();
         answer = await stepped(exchange);

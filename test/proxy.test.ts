@@ -1,10 +1,10 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHost, type RunningHost } from "@weivel/typescript/program";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sent } from "./fixtures/client.js";
+import { abandonedAfterFirstBytes, sent } from "./fixtures/client.js";
 import { bundled, freePort, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
 
@@ -36,15 +36,18 @@ function proxyInstall(port: number, settings: Record<string, unknown> = {}): Ins
   return { manifest, bundle: proxyBundle, settings: { proxy: { port }, upstream: upstream.url, ...settings } };
 }
 
-/** The user's stored model map, a chain of the two providers for the one model, positions keying the list. */
+/** The user's stored model map, a chain of the two providers for the one model. */
 function chainOfBoth(): Record<string, unknown> {
-  const chain = { "1": { provider: "alpha", model: MODEL }, "2": { provider: "beta", model: MODEL } };
+  const chain = [
+    { provider: "alpha", model: MODEL },
+    { provider: "beta", model: MODEL },
+  ];
   return { routing: { modelMap: { sonnet: chain, default: chain } } };
 }
 
-function loggedIn(home: Home): string {
-  const files = readdirSync(home.base, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".log"));
-  return files.map((file) => readFileSync(join(home.base, file), "utf8")).join("\n");
+/** The loader's ready record the run published: ready, or the refusal naming the plugin that did not start. */
+function readyRecord(home: Home): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(home.base, "state", "processes", `${HOST_ID}.ready.json`), "utf8"));
 }
 
 function providerInstall(id: string, mode: string): Install {
@@ -55,7 +58,7 @@ function providerInstall(id: string, mode: string): Install {
     version: "1.0.0",
     entry: "index.js",
     capabilities: { provides: ["forebay.provider"] },
-    services: { consumes: ["weivel.config"] },
+    services: { consumes: ["weivel.config"], provides: [`${id}:probe`] },
     config: { defaults: {} },
   };
   return { manifest, bundle: providerBundle, settings: { mode, name: id, model: MODEL } };
@@ -185,6 +188,27 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(answer.body.trimEnd().split("\n\n").at(-1)).toMatch(/^event: error\ndata: .*"alpha broke mid stream"/s);
   }, RUN_BOUND);
 
+  it("releases the provider's stream when the client goes away mid stream", async () => {
+    const port = await freePort();
+    const run = await started([proxyInstall(port), providerInstall("alpha", "hang")]);
+
+    await abandonedAfterFirstBytes(port, { path: "/v1/messages", body: STREAMED_MESSAGES });
+
+    await expect.poll(() => run.host.service<{ released: number }>("alpha", "alpha:probe")?.released, { timeout: 5_000 }).toBe(1);
+  }, RUN_BOUND);
+
+  it("falls to the next provider when a stream fails before its first byte", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port, chainOfBoth()), providerInstall("alpha", "stream-fails-first"), providerInstall("beta", "stream")]);
+
+    const answer = await sent(port, { path: "/v1/messages", body: STREAMED_MESSAGES });
+
+    expect(answer.status, answer.body).toBe(200);
+    expect(answer.headers["content-type"]).toBe("text/event-stream");
+    expect(answer.body).toContain("streamed by beta");
+    expect(answer.body).not.toContain("event: error");
+  }, RUN_BOUND);
+
   it("refuses a request carrying an Origin", async () => {
     const port = await freePort();
     await started([proxyInstall(port), providerInstall("alpha", "plain")]);
@@ -243,9 +267,11 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     const port = await freePort();
     await blocked(port);
     const run = await started([proxyInstall(port), providerInstall("alpha", "plain")]);
-    await run.host.stop();
 
-    expect(loggedIn(run.home)).toContain(`port ${port} on 127.0.0.1 is already in use, so the proxy cannot listen; fix: stop what listens on port ${port}`);
+    expect(readyRecord(run.home)).toMatchObject({
+      refused: expect.stringContaining(`claude-code-proxy is enabled but did not start: its activate threw: port ${port} on 127.0.0.1 is already in use, so the proxy cannot listen; fix: stop what listens on port ${port}`),
+      fix: "fix or disable claude-code-proxy",
+    });
   }, RUN_BOUND);
 });
 

@@ -1,4 +1,5 @@
-import type { CatalogProvider, LimitsAnswer, Provider, Routing, RoutingProfile, Slot } from "./services.js";
+import { CATALOG_ACTION, CATALOG_EVENT } from "./kinds.js";
+import type { CatalogAnswer, CatalogArgument, CatalogProvider, LogLine, Provider, Routing, RoutingProfile, Slot } from "./services.js";
 
 /** What routing reads of the providers as of their last answers. */
 export interface Snapshot {
@@ -12,69 +13,75 @@ export interface CatalogOptions {
   readonly providers: () => Provider[];
   readonly routing: Routing;
   readonly profile: RoutingProfile;
-  readonly settings: Record<string, unknown>;
-  readonly limits: LimitsAnswer;
-  readonly warn: (message: string) => void;
+  readonly settings: unknown;
+  readonly refreshEveryMilliseconds: number;
+  readonly writeLog: (lines: readonly LogLine[]) => void;
   readonly now: () => number;
 }
+
+/** One round of asks: the implementations it asked, whether it closed, and when its close and re-derivation are done. */
+interface Round {
+  readonly asked: readonly Provider[];
+  closed: boolean;
+  readonly done: Promise<void>;
+  finish(): void;
+}
+
+type EventFacts = Pick<CatalogArgument, "failed" | "round_closed" | "message" | "unasked">;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function withinBudget(work: Promise<unknown>, milliseconds: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const spent = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, milliseconds);
-    timer.unref();
-  });
-  return Promise.race([work.then(() => undefined), spent]).finally(() => clearTimeout(timer));
+function isSameList(left: readonly Provider[], right: readonly Provider[]): boolean {
+  return left.length === right.length && left.every((provider, index) => provider === right[index]);
+}
+
+function newRound(asked: readonly Provider[]): Round {
+  let finish = (): void => undefined;
+  const done = new Promise<void>((resolve) => (finish = resolve));
+  return { asked, closed: false, done, finish };
 }
 
 /**
- * The providers' models, asked of every implementation the proxy sees, within the budget C sets, again whenever the
- * set of implementations changes, at most once per C's interval when a request finds no model, and every period C
- * names. A provider that fails an ask keeps the models it answered last.
+ * The providers' models, kept as `routing.catalog` decides one event at a time: this holds only the timer, the asks,
+ * the models each implementation answered and the facts of the rounds.
  */
 export class Catalog {
   readonly #options: CatalogOptions;
   readonly #answers = new Map<Provider, CatalogProvider>();
-  #asked: Provider[] = [];
-  #slots: readonly Slot[] = [];
-  #lastAsked = Number.NEGATIVE_INFINITY;
-  #shared: Promise<void> | undefined;
   readonly #timer: NodeJS.Timeout;
+  #round: Round | undefined;
+  #lastAsked = 0;
+  #slots: readonly Slot[] = [];
+  #stopped = false;
 
   constructor(options: CatalogOptions) {
     this.#options = options;
-    this.#timer = setInterval(() => void this.#askAll(), options.limits.refresh_every_milliseconds);
+    this.#timer = setInterval(() => void this.#happened(CATALOG_EVENT.PERIOD).catch(() => undefined), options.refreshEveryMilliseconds);
     this.#timer.unref();
   }
 
-  /** The snapshot, asking first when an implementation joined or left since the last ask. */
+  /** The snapshot, once the round a change of the implementations started or joined has closed. */
   async current(): Promise<Snapshot> {
-    const providers = this.#options.providers();
-    const changed = providers.length !== this.#asked.length || providers.some((provider, index) => provider !== this.#asked[index]);
-    if (changed) await this.#askAll();
+    if (!isSameList(this.#options.providers(), this.#round?.asked ?? [])) await this.#happened(CATALOG_EVENT.PROVIDERS_CHANGED);
     return this.#snapshot();
   }
 
-  /** Asks again for a request that found no model, unless an ask was made within C's interval. */
-  async refresh(): Promise<Snapshot> {
-    if (this.#shared === undefined && this.#options.now() - this.#lastAsked >= this.#options.limits.rederive_interval_milliseconds) {
-      await this.#askAll();
-    } else if (this.#shared !== undefined) {
-      await this.#shared;
-    }
+  /** The snapshot after a step found no model, as the round C answers for it leaves it. */
+  async refreshed(): Promise<Snapshot> {
+    await this.#happened(CATALOG_EVENT.NO_MODEL);
     return this.#snapshot();
   }
 
   stop(): void {
+    this.#stopped = true;
     clearInterval(this.#timer);
+    this.#round?.finish();
   }
 
   #snapshot(): Snapshot {
-    const entries = this.#asked.flatMap((provider) => {
+    const entries = (this.#round?.asked ?? []).flatMap((provider) => {
       const answer = this.#answers.get(provider);
       return answer === undefined ? [] : [[answer.provider, provider, answer] as const];
     });
@@ -86,39 +93,69 @@ export class Catalog {
     };
   }
 
-  #askAll(): Promise<void> {
-    this.#shared ??= this.#ask().finally(() => (this.#shared = undefined));
-    return this.#shared;
+  async #decided(event: number, facts: EventFacts = {}): Promise<CatalogAnswer | undefined> {
+    if (this.#stopped) return undefined;
+    const round = this.#round;
+    const argument = { event, now: this.#options.now(), asked: round === undefined ? 0 : 1, last_asked: this.#lastAsked, asking: round !== undefined && !round.closed ? 1 : 0, ...facts };
+    const answer = await this.#options.routing.catalog({ argument });
+    this.#options.writeLog(answer.log);
+    return answer;
   }
 
-  async #ask(): Promise<void> {
+  async #happened(event: number): Promise<void> {
+    const answer = await this.#decided(event);
+    if (answer?.action === CATALOG_ACTION.ASK) await this.#asked(answer.budget_milliseconds);
+    else if (answer?.action === CATALOG_ACTION.WAIT) await this.#round?.done;
+  }
+
+  #asked(budgetMilliseconds: number): Promise<void> {
     const providers = this.#options.providers();
-    this.#asked = providers;
-    this.#lastAsked = this.#options.now();
     for (const known of [...this.#answers.keys()]) if (!providers.includes(known)) this.#answers.delete(known);
-    let late = false;
-    const asked = Promise.all(providers.map((provider) => this.#askOne(provider, () => late)));
-    await withinBudget(asked, this.#options.limits.models_budget_milliseconds);
-    late = true;
-    await this.#rederive();
+    const round = newRound(providers);
+    this.#round = round;
+    this.#lastAsked = this.#options.now();
+    const budget = setTimeout(() => void this.#closed(round), budgetMilliseconds);
+    budget.unref();
+    void Promise.all(providers.map((provider) => this.#askedOne(round, provider))).then(() => this.#closed(round));
+    return round.done.finally(() => clearTimeout(budget));
   }
 
-  async #askOne(provider: Provider, isLate: () => boolean): Promise<void> {
+  async #askedOne(round: Round, provider: Provider): Promise<void> {
+    let models: CatalogProvider | undefined;
+    let message: string | undefined;
     try {
-      const answer = await provider.models({});
-      this.#answers.set(provider, answer.provider);
-      if (isLate()) await this.#rederive();
+      models = (await provider.models({})).provider;
     } catch (error) {
-      this.#options.warn(`a provider answered no models: ${messageOf(error)}`);
+      message = messageOf(error);
+    }
+    const unasked = this.#round?.asked.includes(provider) === true ? 0 : 1;
+    const facts = { failed: models === undefined ? 1 : 0, round_closed: round.closed ? 1 : 0, unasked, ...(message === undefined ? {} : { message }) };
+    const answer = await this.#decided(CATALOG_EVENT.ANSWERED, facts).catch(() => undefined);
+    if (answer === undefined || answer.drop === 1) return;
+    if (models !== undefined) this.#answers.set(provider, models);
+    else if (answer.keep_last !== 1) this.#answers.delete(provider);
+    if (answer.rederive === 1) await this.#rederived();
+  }
+
+  async #closed(round: Round): Promise<void> {
+    if (round.closed) return;
+    round.closed = true;
+    try {
+      const answer = await this.#decided(CATALOG_EVENT.ROUND_CLOSED);
+      if (answer?.rederive === 1) await this.#rederived();
+    } finally {
+      round.finish();
     }
   }
 
-  async #rederive(): Promise<void> {
+  async #rederived(): Promise<void> {
+    if (this.#stopped) return;
     try {
       const map = await this.#options.routing.model_map({ argument: { profile: this.#options.profile, settings: this.#options.settings, providers: this.#snapshot().catalog } });
-      this.#slots = map.slots ?? [];
+      this.#slots = map.slots;
     } catch (error) {
-      this.#options.warn(`the model map could not be derived, so routing keeps the last one: ${messageOf(error)}`);
+      const answer = await this.#decided(CATALOG_EVENT.DERIVE_FAILED, { message: messageOf(error) });
+      if (answer !== undefined && answer.keep_last !== 1) this.#slots = [];
     }
   }
 }

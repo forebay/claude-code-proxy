@@ -24,8 +24,8 @@
       },
       "routing": {
         "tierSourceProvider": "claude-code-provider",
-        "tierOrder": { "1": "opus", "2": "sonnet", "3": "haiku", "4": "fable" },
-        "tierFallback": { "1": "opus", "2": "sonnet", "3": "haiku" },
+        "tierOrder": ["opus", "sonnet", "haiku", "fable"],
+        "tierFallback": ["opus", "sonnet", "haiku"],
         "tierRegex": "^claude-([a-z]+)-\\d",
         "nativeModelPattern": "^claude-",
         "defaultContext": 200000,
@@ -36,7 +36,7 @@
   },
   "access": [
     { "kind": "port", "target": "setting:proxy.port", "mode": "listen", "why": "Claude Code sends its requests to the proxy here" },
-    { "kind": "network", "target": "api.anthropic.com", "mode": "connect", "why": "a request no provider serves passes through to the upstream setting, this host by default" }
+    { "kind": "network", "target": "setting:upstream", "mode": "connect", "why": "a request no provider serves passes through to the upstream" }
   ],
   "publish": {
     "scopedOnly": true
