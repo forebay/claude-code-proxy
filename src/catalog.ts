@@ -1,12 +1,13 @@
-import { CATALOG_ACTION, CATALOG_EVENT, LOG_LEVEL } from "./kinds.js";
-import type { CatalogAnswer, CatalogArgument, CatalogProvider, LogLine, Provider, Routing, RoutingProfile, Slot } from "./services.js";
+import { CATALOG_EVENT, CATALOG_TIMER, CATALOG_TIMER_CHANGE, LOG_LEVEL, STATUS } from "./kinds.js";
+import type { CatalogEventAnswer, CatalogEventArgument, CatalogModel, CatalogProvider, CatalogTimer, Handle, LogLine, Provider, Routing, RoutingProfile, Slot } from "./services.js";
 
-/** What routing reads of the providers as of their last answers. */
+/** What routing reads of the providers as the catalog stands. */
 export interface Snapshot {
   readonly names: string[];
   readonly byName: ReadonlyMap<string, Provider>;
-  readonly catalog: CatalogProvider[];
+  readonly catalog: readonly CatalogProvider[];
   readonly slots: readonly Slot[];
+  readonly entries: readonly CatalogModel[];
 }
 
 export interface CatalogOptions {
@@ -14,199 +15,177 @@ export interface CatalogOptions {
   readonly routing: Routing;
   readonly profile: RoutingProfile;
   readonly settings: unknown;
-  readonly refreshEveryMilliseconds: number;
   readonly writeLog: (lines: readonly LogLine[]) => void;
   readonly now: () => number;
 }
 
-/**
- * One round of asks: the implementations it asked, its budget timer, whether its asks closed, whether its close and
- * re-derivation have finished (until then it is open to C), whether a newer round superseded it, and when it is done.
- */
-interface Round {
-  readonly asked: readonly Provider[];
-  budget?: NodeJS.Timeout;
-  closed: boolean;
-  settled: boolean;
-  superseded: boolean;
-  readonly done: Promise<void>;
-  finish(): void;
-}
-
-type EventFacts = Pick<CatalogArgument, "failed" | "round_closed" | "message" | "unasked" | "changed">;
+type EventFacts = Omit<CatalogEventArgument, "catalog" | "now">;
 
 function messageOf(error: unknown): string {
+  const { detail } = error as { detail?: unknown };
+  if (typeof detail === "string") return detail;
   return error instanceof Error ? error.message : String(error);
 }
 
-function isSameList(left: readonly Provider[], right: readonly Provider[]): boolean {
-  return left.length === right.length && left.every((provider, index) => provider === right[index]);
+function isOutOfMemory(error: unknown): boolean {
+  return (error as { status?: unknown }).status === STATUS.OUT_OF_MEMORY;
 }
 
-function newRound(asked: readonly Provider[]): Round {
-  let finish = (): void => undefined;
-  const done = new Promise<void>((resolve) => (finish = resolve));
-  return { asked, closed: false, settled: false, superseded: false, done, finish };
+function timerKey(kind: number, round: number): string {
+  return `${kind}:${round}`;
 }
 
 /**
- * The providers' models, kept as `routing.catalog` decides one event at a time: this holds only the timer, the asks,
- * the models each implementation answered and the facts of the rounds.
+ * The providers' models, kept by forebay-library's catalog object: this performs the asks it names, sets and clears
+ * the timers it names and parks each request on the round it names until it lists that round as released.
  */
 export class Catalog {
   readonly #options: CatalogOptions;
-  readonly #answers = new Map<Provider, CatalogProvider>();
-  readonly #timer: NodeJS.Timeout;
-  #round: Round | undefined;
-  #lastAsked = 0;
-  #slots: readonly Slot[] = [];
-  #stopped = false;
+  readonly #handle: Handle;
+  readonly #timers = new Map<string, NodeJS.Timeout>();
+  readonly #parked = new Map<number, (() => void)[]>();
+  readonly #names = new WeakMap<Provider, string>();
+  readonly #byName = new Map<string, Provider>();
+  #released = false;
 
-  constructor(options: CatalogOptions) {
+  private constructor(options: CatalogOptions, handle: Handle) {
     this.#options = options;
-    this.#timer = setInterval(() => this.#logged(this.#happened(CATALOG_EVENT.PERIOD)), options.refreshEveryMilliseconds);
-    this.#timer.unref();
+    this.#handle = handle;
   }
 
-  /** The snapshot a request reads, once it reported READ and waited as C answered. */
+  static async opened(options: CatalogOptions): Promise<Catalog> {
+    const { catalog, timers } = await options.routing.catalog_open({ argument: { now: options.now(), profile: options.profile, settings: options.settings } });
+    const opened = new Catalog(options, catalog);
+    opened.#timed(timers);
+    return opened;
+  }
+
+  /** The snapshot a request reads, once it reported READ and waited on the round C named. */
   async current(): Promise<Snapshot> {
-    const changed = isSameList(this.#options.providers(), this.#round?.asked ?? []) ? 0 : 1;
-    await this.#happened(CATALOG_EVENT.READ, { changed });
-    return this.#snapshot();
+    await this.#requested(CATALOG_EVENT.READ);
+    return this.#read();
   }
 
-  /** The snapshot after a step found no model, as the round C answers for it leaves it. */
+  /** The snapshot after a step found no model, once it reported NO_MODEL and waited on the round C named. */
   async refreshed(): Promise<Snapshot> {
-    await this.#happened(CATALOG_EVENT.NO_MODEL);
-    return this.#snapshot();
+    await this.#requested(CATALOG_EVENT.NO_MODEL);
+    return this.#read();
   }
 
-  stop(): void {
-    this.#stopped = true;
-    clearInterval(this.#timer);
-    if (this.#round !== undefined) this.#ended(this.#round);
+  release(): void {
+    if (this.#released) return;
+    this.#released = true;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
+    for (const waiters of this.#parked.values()) waiters.forEach((resume) => resume());
+    this.#parked.clear();
+    this.#handle.release();
   }
 
-  #snapshot(asked: readonly Provider[] = this.#round?.asked ?? []): Snapshot {
-    const entries = asked.flatMap((provider) => {
-      const answer = this.#answers.get(provider);
-      return answer === undefined ? [] : [[answer.provider, provider, answer] as const];
+  /** The names of the implementations offered now, in order, each named once for as long as it lives. */
+  #offered(): string[] {
+    return this.#options.providers().map((provider) => {
+      let name = this.#names.get(provider);
+      if (name === undefined) {
+        name = `implementation-${this.#byName.size + 1}`;
+        this.#names.set(provider, name);
+        this.#byName.set(name, provider);
+      }
+      return name;
     });
-    return {
-      names: entries.map(([name]) => name),
-      byName: new Map(entries.map(([name, provider]) => [name, provider])),
-      catalog: entries.map(([, , answer]) => answer),
-      slots: this.#slots,
-    };
+  }
+
+  async #read(): Promise<Snapshot> {
+    if (this.#released) throw new Error("the catalog was released, so the proxy is stopping");
+    const read = await this.#options.routing.catalog_read({ argument: { catalog: this.#handle } });
+    const providers = read.providers.map((answer, index) => [answer.provider, this.#byName.get(read.implementations[index]!)!] as const);
+    return { names: providers.map(([name]) => name), byName: new Map(providers), catalog: read.providers, slots: read.slots, entries: read.entries };
+  }
+
+  async #requested(kind: number): Promise<void> {
+    if (this.#released) return;
+    let answer: CatalogEventAnswer;
+    try {
+      answer = await this.#event({ kind, implementations: this.#offered() });
+    } catch (error) {
+      this.#warn(error);
+      return;
+    }
+    const waited = answer.wait_round === 0 ? undefined : this.#waitedOn(answer.wait_round);
+    this.#acted(answer);
+    await waited;
+  }
+
+  #event(facts: EventFacts): Promise<CatalogEventAnswer> {
+    return this.#options.routing.catalog_event({ argument: { catalog: this.#handle, now: this.#options.now(), ...facts } });
+  }
+
+  #waitedOn(round: number): Promise<void> {
+    return new Promise((resume) => {
+      const waiters = this.#parked.get(round) ?? [];
+      waiters.push(resume);
+      this.#parked.set(round, waiters);
+    });
+  }
+
+  #acted(answer: CatalogEventAnswer): void {
+    this.#options.writeLog(answer.log);
+    this.#timed(answer.timers);
+    for (const implementation of answer.asks) void this.#asked(answer.ask_round, implementation);
+    for (const round of answer.released) {
+      this.#parked.get(round)?.forEach((resume) => resume());
+      this.#parked.delete(round);
+    }
+  }
+
+  #timed(timers: readonly CatalogTimer[]): void {
+    for (const { change, kind, round, due } of timers) {
+      const key = timerKey(kind, round);
+      clearTimeout(this.#timers.get(key));
+      this.#timers.delete(key);
+      if (change !== CATALOG_TIMER_CHANGE.SET) continue;
+      const timer = setTimeout(() => {
+        this.#timers.delete(key);
+        void this.#fired(kind, round);
+      }, Math.max(0, due - this.#options.now()));
+      timer.unref();
+      this.#timers.set(key, timer);
+    }
   }
 
   /**
-   * C's answer to an event of `round`, or undefined once stopped or when C refused it, which is logged and ends
-   * `round` alone.
+   * @implNote Only an OUT_OF_MEMORY is reported again, at once: nothing else would close the round or re-set the
+   * period. Any other refusal is the host's misuse, logged once.
    */
-  async #decided(event: number, round: Round | undefined, facts: EventFacts = {}): Promise<CatalogAnswer | undefined> {
-    if (this.#stopped) return undefined;
-    const current = this.#round;
-    const argument = { event, now: this.#options.now(), asked: current === undefined ? 0 : 1, last_asked: this.#lastAsked, asking: current !== undefined && !current.settled ? 1 : 0, ...facts };
+  async #fired(kind: number, round: number): Promise<void> {
+    if (this.#released) return;
+    const facts = kind === CATALOG_TIMER.PERIOD ? { implementations: this.#offered() } : {};
     try {
-      const answer = await this.#options.routing.catalog({ argument });
-      this.#options.writeLog(answer.log);
-      return answer;
+      this.#acted(await this.#event({ kind: CATALOG_EVENT.TIMER, timer: kind, round, ...facts }));
     } catch (error) {
       this.#warn(error);
-      if (round !== undefined) this.#ended(round);
-      return undefined;
+      if (isOutOfMemory(error)) setImmediate(() => void this.#fired(kind, round));
+    }
+  }
+
+  /** @implNote A refused ANSWERED is only logged: its round closes at its own round close timer. */
+  async #asked(round: number, implementation: string): Promise<void> {
+    let facts: EventFacts;
+    try {
+      const { provider } = await this.#byName.get(implementation)!.models({});
+      facts = { kind: CATALOG_EVENT.ANSWERED, round, implementation, models: provider };
+    } catch (error) {
+      facts = { kind: CATALOG_EVENT.ANSWERED, round, implementation, failed: 1, message: messageOf(error) };
+    }
+    if (this.#released) return;
+    try {
+      this.#acted(await this.#event(facts));
+    } catch (error) {
+      this.#warn(error);
     }
   }
 
   #warn(error: unknown): void {
-    const { detail } = error as { detail?: unknown };
-    this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: typeof detail === "string" ? detail : messageOf(error) }]);
-  }
-
-  #logged(work: Promise<unknown>): void {
-    work.catch((error: unknown) => this.#warn(error));
-  }
-
-  /** @implNote A superseded round ends with the round that superseded it, whose waiters its own waiters became. */
-  #ended(round: Round): void {
-    clearTimeout(round.budget);
-    if (round.superseded) return;
-    round.closed = true;
-    round.settled = true;
-    round.finish();
-  }
-
-  async #happened(event: number, facts: EventFacts = {}): Promise<void> {
-    const round = this.#round;
-    const answer = await this.#decided(event, round, facts);
-    if (answer?.action === CATALOG_ACTION.ASK) await this.#asked(answer.budget_milliseconds);
-    else if (answer?.action === CATALOG_ACTION.WAIT) await this.#round?.done;
-  }
-
-  #asked(budgetMilliseconds: number): Promise<void> {
-    const providers = this.#options.providers();
-    for (const known of [...this.#answers.keys()]) if (!providers.includes(known)) this.#answers.delete(known);
-    const round = newRound(providers);
-    this.#superseded(round);
-    this.#round = round;
-    this.#lastAsked = this.#options.now();
-    round.budget = setTimeout(() => this.#logged(this.#closed(round)), budgetMilliseconds);
-    round.budget.unref();
-    this.#logged(Promise.all(providers.map((provider) => this.#askedOne(round, provider))).then(() => this.#closed(round)));
-    return round.done;
-  }
-
-  /** Marks the open round, if any, superseded by `newer`: its timer stops, and its waiters wait for `newer`. */
-  #superseded(newer: Round): void {
-    const older = this.#round;
-    if (older === undefined || older.closed || older.settled) return;
-    clearTimeout(older.budget);
-    older.superseded = true;
-    void newer.done.then(() => older.finish());
-  }
-
-  /**
-   * @implNote An older round's answer, closed or superseded, is still reported, so a failure is warned, but never
-   * stored or re-derived: for a provider the newer round also asks, that round's own answer is the one that counts,
-   * and a derivation over the older list would drop the newer providers' slots.
-   */
-  async #askedOne(round: Round, provider: Provider): Promise<void> {
-    let models: CatalogProvider | undefined;
-    let message: string | undefined;
-    try {
-      models = (await provider.models({})).provider;
-    } catch (error) {
-      message = messageOf(error);
-    }
-    const unasked = this.#round?.asked.includes(provider) === true ? 0 : 1;
-    const facts = { failed: models === undefined ? 1 : 0, round_closed: round.closed ? 1 : 0, unasked, ...(message === undefined ? {} : { message }) };
-    const answer = await this.#decided(CATALOG_EVENT.ANSWERED, round, facts);
-    if (answer === undefined || answer.drop === 1 || round !== this.#round) return;
-    if (models !== undefined) this.#answers.set(provider, models);
-    else if (answer.keep_last !== 1) this.#answers.delete(provider);
-    if (answer.rederive === 1) await this.#rederived(round);
-  }
-
-  async #closed(round: Round): Promise<void> {
-    if (round.closed || round.superseded) return;
-    round.closed = true;
-    try {
-      const answer = await this.#decided(CATALOG_EVENT.ROUND_CLOSED, round);
-      if (answer?.rederive === 1 && round === this.#round) await this.#rederived(round);
-    } finally {
-      this.#ended(round);
-    }
-  }
-
-  async #rederived(round: Round): Promise<void> {
-    if (this.#stopped) return;
-    try {
-      const map = await this.#options.routing.model_map({ argument: { profile: this.#options.profile, settings: this.#options.settings, providers: this.#snapshot(round.asked).catalog } });
-      this.#slots = map.slots;
-    } catch (error) {
-      const answer = await this.#decided(CATALOG_EVENT.DERIVE_FAILED, round, { message: messageOf(error) });
-      if (answer !== undefined && answer.keep_last !== 1) this.#slots = [];
-    }
+    this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: messageOf(error) }]);
   }
 }

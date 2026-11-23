@@ -66,20 +66,20 @@ async function started(context: PluginContext): Promise<Running> {
   const writeLog = logWriter(required<Log>(context, "weivel.log"));
   const limits = await routing.limits({});
   const providers = (): Provider[] => context.capabilities.all(context.capability<Provider>(PROVIDER_CAPABILITY));
-  const catalog = new Catalog({ providers, routing, profile: settings.profile, settings: settings.record, refreshEveryMilliseconds: limits.refresh_every_milliseconds, writeLog, now: Date.now });
+  const catalog = await Catalog.opened({ providers, routing, profile: settings.profile, settings: settings.record, writeLog, now: Date.now });
   const proxy: { -readonly [Key in keyof Proxy]: Proxy[Key] } = { routing, anthropic, settings, port: 0, limits, catalog, writeLog };
   const server = createServer((incoming, response) => void serve(proxy, incoming, response));
   try {
     proxy.port = await listening(routing, settings, server);
   } catch (error) {
-    catalog.stop();
+    catalog.release();
     throw error;
   }
   return { server, catalog };
 }
 
 function stopped(stopping: Running): Promise<void> {
-  stopping.catalog.stop();
+  stopping.catalog.release();
   return new Promise((resolve) => {
     stopping.server.close(() => resolve());
     stopping.server.closeAllConnections();

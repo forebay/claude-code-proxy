@@ -255,7 +255,7 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(probe()?.releasedWhileReading).toBe(0);
   }, RUN_BOUND);
 
-  it("logs a catalog decision C refuses, ends that round and keeps serving", async () => {
+  it("logs an answer C refuses and keeps serving once that round's own timer closes it", async () => {
     const port = await freePort();
     const run = await started([proxyInstall(port), providerInstall("alpha", "models-refused")]);
 

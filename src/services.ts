@@ -114,31 +114,48 @@ export interface FailureAnswer {
   readonly log: readonly LogLine[];
 }
 
-export interface CatalogArgument {
-  readonly event: number;
-  readonly now: number;
-  readonly asked: number;
-  readonly last_asked: number;
-  readonly asking: number;
-  readonly failed?: number;
-  readonly round_closed?: number;
-  readonly message?: string;
-  readonly unasked?: number;
-  readonly changed?: number;
+export interface CatalogTimer {
+  readonly change: number;
+  readonly kind: number;
+  readonly round: number;
+  readonly due: number;
 }
 
-export interface CatalogAnswer {
-  readonly action: number;
-  readonly budget_milliseconds: number;
-  readonly keep_last: number;
-  readonly rederive: number;
+export interface CatalogOpenAnswer {
+  readonly catalog: Handle;
+  readonly timers: readonly CatalogTimer[];
+}
+
+export interface CatalogEventArgument {
+  readonly catalog: Handle;
+  readonly kind: number;
+  readonly now: number;
+  readonly implementations?: readonly string[];
+  readonly round?: number;
+  readonly implementation?: string;
+  readonly models?: CatalogProvider;
+  readonly failed?: number;
+  readonly message?: string;
+  readonly timer?: number;
+}
+
+export interface CatalogEventAnswer {
+  readonly wait_round: number;
+  readonly ask_round: number;
+  readonly asks: readonly string[];
+  readonly timers: readonly CatalogTimer[];
+  readonly released: readonly number[];
   readonly log: readonly LogLine[];
-  readonly drop: number;
+}
+
+export interface CatalogReadAnswer {
+  readonly implementations: readonly string[];
+  readonly providers: readonly CatalogProvider[];
+  readonly slots: readonly Slot[];
+  readonly entries: readonly CatalogModel[];
 }
 
 export interface Routing {
-  model_map(input: { argument: { profile: RoutingProfile; settings: unknown; providers: readonly CatalogProvider[] } }): Promise<{ slots: readonly Slot[] }>;
-  model_entries(input: { argument: { profile: RoutingProfile; catalog: readonly CatalogProvider[] } }): Promise<{ entries: readonly CatalogModel[] }>;
   step(input: { argument: StepArgument }): Promise<StepAnswer>;
   limits(input: Record<string, never>): Promise<LimitsAnswer>;
   pass_through(input: {
@@ -148,7 +165,9 @@ export interface Routing {
   arrival(input: { argument: { path: string; headers: readonly Pair[]; port: number } }): Promise<ArrivalAnswer>;
   port(input: { argument: { value: unknown; settings_file: unknown; failure?: { in_use: number; detail: string } } }): Promise<{ port: number; address: string }>;
   failure(input: { argument: { reason: number; upstream?: unknown; detail: string } }): Promise<FailureAnswer>;
-  catalog(input: { argument: CatalogArgument }): Promise<CatalogAnswer>;
+  catalog_open(input: { argument: { now: number; profile: RoutingProfile; settings: unknown } }): Promise<CatalogOpenAnswer>;
+  catalog_event(input: { argument: CatalogEventArgument }): Promise<CatalogEventAnswer>;
+  catalog_read(input: { argument: { catalog: Handle } }): Promise<CatalogReadAnswer>;
 }
 
 /** Bytes C wrote and the status, content type and headers it answers they go out in. */

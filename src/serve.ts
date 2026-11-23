@@ -47,8 +47,7 @@ async function answeredArrival(proxy: Proxy, incoming: IncomingMessage, response
 }
 
 async function models(proxy: Proxy, response: ServerResponse, lookup: string | undefined): Promise<void> {
-  const snapshot = await proxy.catalog.current();
-  const { entries } = await proxy.routing.model_entries({ argument: { profile: proxy.settings.profile, catalog: snapshot.catalog } });
+  const { entries } = await proxy.catalog.current();
   if (lookup === undefined) written(response, await proxy.anthropic.model_listing({ argument: { models: entries } }));
   else written(response, await proxy.anthropic.model_lookup({ argument: { models: entries, id: decodeURIComponent(lookup) } }));
 }

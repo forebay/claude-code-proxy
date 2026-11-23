@@ -20,8 +20,12 @@ export const IR_EVENT_ERROR = 10;
 
 export const LOG_LEVEL = { INFO: 1, WARN: 2 } as const;
 
-export const CATALOG_EVENT = { PROVIDERS_CHANGED: 1, NO_MODEL: 2, PERIOD: 3, ANSWERED: 4, ROUND_CLOSED: 5, DERIVE_FAILED: 6, READ: 7 } as const;
+export const CATALOG_EVENT = { READ: 1, NO_MODEL: 2, ANSWERED: 3, TIMER: 4 } as const;
 
-export const CATALOG_ACTION = { NOTHING: 1, ASK: 2, WAIT: 3 } as const;
+export const CATALOG_TIMER = { ROUND_CLOSE: 1, PERIOD: 2 } as const;
+
+export const CATALOG_TIMER_CHANGE = { SET: 1, CLEAR: 2 } as const;
+
+export const STATUS = { OUT_OF_MEMORY: 4 } as const;
 
 export const WEIVEL_LOG = { INFO: 3, WARN: 4 } as const;
