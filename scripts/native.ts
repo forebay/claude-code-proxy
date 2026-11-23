@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 interface NativeLibrary {
@@ -25,27 +25,24 @@ function cmake(cmakeArguments: readonly string[]): void {
   execFileSync("cmake", cmakeArguments, { stdio: "inherit" });
 }
 
-function foundBelow(directory: string, fileName: string): string | undefined {
-  for (const entry of readdirSync(directory)) {
-    const path = join(directory, entry);
-    if (entry === fileName && statSync(path).isFile()) return path;
-    if (statSync(path).isDirectory()) {
-      const found = foundBelow(path, fileName);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
+/**
+ * The configure arguments that put every binary of a build directly in `bin`, on every system.
+ * @implNote MSVC appends the configuration to a plain output directory, so the `_RELEASE` variants are set as well.
+ */
+function outputArguments(bin: string): string[] {
+  return ["LIBRARY", "RUNTIME", "ARCHIVE"].flatMap((kind) => [`-DCMAKE_${kind}_OUTPUT_DIRECTORY=${bin}`, `-DCMAKE_${kind}_OUTPUT_DIRECTORY_RELEASE=${bin}`]);
 }
 
 function built(library: NativeLibrary): void {
   const source = join(SIBLINGS, library.sibling);
   if (!existsSync(join(source, "CMakeLists.txt"))) throw new Error(`siblings/${library.sibling} is missing: check out what repo.json pins there`);
   const build = join(source, "build");
-  cmake(["-S", source, "-B", build, "-DCMAKE_BUILD_TYPE=Release"]);
+  const bin = join(build, "bin");
+  cmake(["-S", source, "-B", build, "-DCMAKE_BUILD_TYPE=Release", ...outputArguments(bin)]);
   cmake(["--build", build, "--config", "Release", "--target", library.target]);
   const fileName = sharedLibraryFileName(library.target);
-  const binary = foundBelow(join(build, "bin"), fileName);
-  if (binary === undefined) throw new Error(`the build of ${library.sibling} left no ${fileName} under its bin`);
+  const binary = join(bin, fileName);
+  if (!existsSync(binary)) throw new Error(`the build of ${library.sibling} left no ${fileName} in ${bin}`);
   const destination = join(NATIVE, library.target);
   mkdirSync(destination, { recursive: true });
   copyFileSync(binary, join(destination, fileName));
