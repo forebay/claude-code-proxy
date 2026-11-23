@@ -103,6 +103,8 @@ export default {
     const modelsDelay = Number(await optionalText(config, "modelsDelay"));
     const emptyUntilAsk = Number(await optionalText(config, "emptyUntilAsk"));
     const activateDelay = Number(await optionalText(config, "activateDelay"));
+    const firstAskDelay = Number(await optionalText(config, "firstAskDelay"));
+    const firstAskModel = (await optionalText(config, "firstAskModel")) ?? model;
     const probe: Probe = { released: 0, releasedWhileReading: 0 };
     let asks = 0;
     context.services.register(context.service(`${name}:probe`), probe);
@@ -110,9 +112,12 @@ export default {
     context.provide(context.capability("forebay.provider"), {
       async models() {
         asks += 1;
+        const first = asks === 1;
         if (mode === "models-refused") throw new Error(`${name}\u0000broke`);
-        if (modelsDelay > 0) await waited(modelsDelay);
-        const models = asks < emptyUntilAsk ? [] : [{ id: model, name: model }];
+        const delay = first && firstAskDelay > 0 ? firstAskDelay : modelsDelay;
+        if (delay > 0) await waited(delay);
+        const id = first ? firstAskModel : model;
+        const models = asks < emptyUntilAsk ? [] : [{ id, name: id }];
         return { provider: { provider: name, models, has_ranking: 0, default_model: model } };
       },
       async handle(input: { argument: { request: { model: string } } }) {

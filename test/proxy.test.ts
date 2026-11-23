@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHost, type RunningHost } from "@weivel/typescript/program";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { abandonedAfterFirstBytes, sent } from "./fixtures/client.js";
+import { abandonedAfterFirstBytes, sent, type Answer } from "./fixtures/client.js";
 import { bundled, freePort, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
 
@@ -71,6 +71,38 @@ async function listening(port: number): Promise<void> {
     if (answer?.status === 200) return;
     await waited(20);
   }
+}
+
+interface Change {
+  readonly port: number;
+  readonly sentBeforeTheChange: boolean;
+  readonly first: Promise<Answer>;
+  readonly second: Answer;
+}
+
+/**
+ * Starts zeta at once and zulu 600 ms later, sends a first `/v1/models` while only zeta is offered, and a second once
+ * zulu is, which changes the list during the first request's round.
+ */
+async function changedDuringARound(zeta: Record<string, unknown>, zulu: Record<string, unknown>): Promise<Change> {
+  const port = await freePort();
+  let activated = false;
+  // Ids that sort after the proxy's: runtime activates in that order, so the proxy listens before they activate.
+  const run = started([
+    proxyInstall(port),
+    providerInstall("zeta", "plain", zeta),
+    providerInstall("zulu", "plain", { model: "claude-haiku-4-5", activateDelay: "600", ...zulu }),
+  ]).then((running) => {
+    activated = true;
+    return running;
+  });
+  await listening(port);
+  await waited(100);
+  const sentBeforeTheChange = !activated;
+  const first = sent(port, { method: "GET", path: "/v1/models" });
+  await run;
+  const second = await sent(port, { method: "GET", path: "/v1/models" });
+  return { port, sentBeforeTheChange, first, second };
 }
 
 function providerInstall(id: string, mode: string, settings: Record<string, unknown> = {}): Install {
@@ -253,27 +285,22 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
   }, RUN_BOUND);
 
   it("lets a change during an open round supersede it, whose waiters then wait for the new round", async () => {
-    const port = await freePort();
-    let activated = false;
-    // Ids that sort after the proxy's: runtime activates in that order, so the proxy listens before they activate.
-    const run = started([
-      proxyInstall(port),
-      providerInstall("zeta", "plain", { modelsDelay: "2500" }),
-      providerInstall("zulu", "plain", { model: "claude-haiku-4-5", activateDelay: "600", modelsDelay: "1800" }),
-    ]).then((running) => {
-      activated = true;
-      return running;
-    });
-    await listening(port);
-    await waited(100);
-    const sentBeforeTheChange = !activated;
-    const first = sent(port, { method: "GET", path: "/v1/models" });
-    await run;
-    const second = await sent(port, { method: "GET", path: "/v1/models" });
+    const change = await changedDuringARound({ firstAskDelay: "2500", modelsDelay: "1700" }, { modelsDelay: "1800" });
 
-    expect(sentBeforeTheChange).toBe(true);
-    expect(listedIds(second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
-    expect(listedIds((await first).body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(change.sentBeforeTheChange).toBe(true);
+    expect(listedIds(change.second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(listedIds((await change.first).body)).toEqual([MODEL, "claude-haiku-4-5"]);
+  }, RUN_BOUND);
+
+  it("keeps the newer round's models when the superseded round's answer for the same provider lands later", async () => {
+    const change = await changedDuringARound({ firstAskDelay: "2500", firstAskModel: "claude-opus-4-1", modelsDelay: "300" }, { modelsDelay: "300" });
+    await change.first;
+    await waited(2_500);
+    const after = await sent(change.port, { method: "GET", path: "/v1/models" });
+
+    expect(change.sentBeforeTheChange).toBe(true);
+    expect(listedIds(change.second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(listedIds(after.body)).toEqual([MODEL, "claude-haiku-4-5"]);
   }, RUN_BOUND);
 
   it("lists the whole catalog to two requests arriving together while the first round is open", async () => {

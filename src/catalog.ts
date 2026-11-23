@@ -20,13 +20,14 @@ export interface CatalogOptions {
 }
 
 /**
- * One round of asks: the implementations it asked, its budget timer, whether it closed or a newer round superseded
- * it, and when its close and re-derivation are done.
+ * One round of asks: the implementations it asked, its budget timer, whether its asks closed, whether its close and
+ * re-derivation have finished (until then it is open to C), whether a newer round superseded it, and when it is done.
  */
 interface Round {
   readonly asked: readonly Provider[];
   budget?: NodeJS.Timeout;
   closed: boolean;
+  settled: boolean;
   superseded: boolean;
   readonly done: Promise<void>;
   finish(): void;
@@ -45,7 +46,7 @@ function isSameList(left: readonly Provider[], right: readonly Provider[]): bool
 function newRound(asked: readonly Provider[]): Round {
   let finish = (): void => undefined;
   const done = new Promise<void>((resolve) => (finish = resolve));
-  return { asked, closed: false, superseded: false, done, finish };
+  return { asked, closed: false, settled: false, superseded: false, done, finish };
 }
 
 /**
@@ -86,8 +87,8 @@ export class Catalog {
     if (this.#round !== undefined) this.#ended(this.#round);
   }
 
-  #snapshot(): Snapshot {
-    const entries = (this.#round?.asked ?? []).flatMap((provider) => {
+  #snapshot(asked: readonly Provider[] = this.#round?.asked ?? []): Snapshot {
+    const entries = asked.flatMap((provider) => {
       const answer = this.#answers.get(provider);
       return answer === undefined ? [] : [[answer.provider, provider, answer] as const];
     });
@@ -106,7 +107,7 @@ export class Catalog {
   async #decided(event: number, round: Round | undefined, facts: EventFacts = {}): Promise<CatalogAnswer | undefined> {
     if (this.#stopped) return undefined;
     const current = this.#round;
-    const argument = { event, now: this.#options.now(), asked: current === undefined ? 0 : 1, last_asked: this.#lastAsked, asking: current !== undefined && !current.closed ? 1 : 0, ...facts };
+    const argument = { event, now: this.#options.now(), asked: current === undefined ? 0 : 1, last_asked: this.#lastAsked, asking: current !== undefined && !current.settled ? 1 : 0, ...facts };
     try {
       const answer = await this.#options.routing.catalog({ argument });
       this.#options.writeLog(answer.log);
@@ -132,6 +133,7 @@ export class Catalog {
     clearTimeout(round.budget);
     if (round.superseded) return;
     round.closed = true;
+    round.settled = true;
     round.finish();
   }
 
@@ -158,12 +160,16 @@ export class Catalog {
   /** Marks the open round, if any, superseded by `newer`: its timer stops, and its waiters wait for `newer`. */
   #superseded(newer: Round): void {
     const older = this.#round;
-    if (older === undefined || older.closed) return;
+    if (older === undefined || older.closed || older.settled) return;
     clearTimeout(older.budget);
     older.superseded = true;
     void newer.done.then(() => older.finish());
   }
 
+  /**
+   * @implNote A superseded round's answer is still reported, so a failure is warned, but never stored: for a provider
+   * the newer round also asks, that round's own answer is the one that counts.
+   */
   async #askedOne(round: Round, provider: Provider): Promise<void> {
     let models: CatalogProvider | undefined;
     let message: string | undefined;
@@ -175,7 +181,7 @@ export class Catalog {
     const unasked = this.#round?.asked.includes(provider) === true ? 0 : 1;
     const facts = { failed: models === undefined ? 1 : 0, round_closed: round.closed ? 1 : 0, unasked, ...(message === undefined ? {} : { message }) };
     const answer = await this.#decided(CATALOG_EVENT.ANSWERED, round, facts);
-    if (answer === undefined || answer.drop === 1) return;
+    if (answer === undefined || answer.drop === 1 || round.superseded) return;
     if (models !== undefined) this.#answers.set(provider, models);
     else if (answer.keep_last !== 1) this.#answers.delete(provider);
     if (answer.rederive === 1) await this.#rederived(round);
@@ -195,7 +201,7 @@ export class Catalog {
   async #rederived(round: Round): Promise<void> {
     if (this.#stopped) return;
     try {
-      const map = await this.#options.routing.model_map({ argument: { profile: this.#options.profile, settings: this.#options.settings, providers: this.#snapshot().catalog } });
+      const map = await this.#options.routing.model_map({ argument: { profile: this.#options.profile, settings: this.#options.settings, providers: this.#snapshot(round.asked).catalog } });
       this.#slots = map.slots;
     } catch (error) {
       const answer = await this.#decided(CATALOG_EVENT.DERIVE_FAILED, round, { message: messageOf(error) });
