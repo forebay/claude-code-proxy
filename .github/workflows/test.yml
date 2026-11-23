@@ -9,8 +9,12 @@ jobs:
   test:
     uses: intisy/workflows/.github/workflows/test.yml@main
     with:
-      toolchains: node
+      toolchains: node cmake
       runners: '["ubuntu-latest","windows-latest","macos-latest"]'
-      node_install: npm ci --prefix siblings/anthropic-translator/siblings/host/siblings/model && npm ci --prefix siblings/anthropic-translator/siblings/host/siblings/typescript && npm ci --prefix siblings/anthropic-translator/siblings/host && npm ci --prefix siblings/anthropic-translator && npm ci
-      node_build: npm run build --prefix siblings/anthropic-translator/siblings/host/siblings/typescript && npm run build --prefix siblings/anthropic-translator/siblings/host && npm run build --prefix siblings/anthropic-translator && npm run build
+      cmake_version: '4.4.4'
+      cmake_configure: ''
+      cmake_build: ''
+      cmake_test: ''
+      node_install: npm ci --prefix siblings/typescript && npm ci
+      node_build: npm run build --prefix siblings/typescript && npm run build
       node_test: npm test
