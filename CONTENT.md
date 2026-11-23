@@ -3,8 +3,8 @@ every decision: whether a request is admitted, what it is, how its body reads, w
 when one fails and how each reply is written. The plugin holds only the I/O and the order of the calls.
 
 It reaches C only through its host: it consumes the `routing` and `anthropic` services and the `forebay.provider`
-capability by id through its context, and reads its settings, folders and log through `weivel.config`,
-`weivel.paths` and `weivel.log`. It never loads a library itself.
+capability by id through its context, and reads its settings and writes its log through `weivel.config` and
+`weivel.log`. It never loads a library itself.
 
 ## Structure
 
@@ -18,10 +18,12 @@ capability by id through its context, and reads its settings, folders and log th
   C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
   offers one, a client going away included.
 - `src/pass-through.ts`: `routing.pass_through` and `reply_headers`, and `routing.failure` for an unreachable upstream.
-- `src/catalog.ts`: the providers' models, kept as `routing.catalog` decides each event (the implementations changing,
-  a step finding no model, the period, an answer, a round closing, a failed derivation); it holds the timer, the
-  asks, the models and the facts of the rounds, and the model map `routing.model_map` derives.
-- `src/settings.ts`: each setting whole through `weivel.config`'s `get_tree`.
+- `src/catalog.ts`: the providers' models, kept as `routing.catalog` decides each event (every request's read, a step
+  finding no model, the period, an answer, a round closing, a failed derivation); it holds the timer, the asks, the
+  models and the facts of the rounds, a newer round superseding an open one, and the model map `routing.model_map`
+  derives.
+- `src/settings.ts`: each setting whole through `weivel.config`'s `get_tree`, and the settings file C names to the
+  user from its `settings_file`.
 - `src/zone.ts`: the machine's zone offset and short name at an instant, from `Intl`, which C names a reset in.
 
 ## Configuration
