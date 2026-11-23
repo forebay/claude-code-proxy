@@ -3,7 +3,7 @@ import type { PluginContext } from "@weivel/typescript/context";
 import { Catalog } from "./catalog.js";
 import { LOG_LEVEL, WEIVEL_LOG } from "./kinds.js";
 import { serve, type Proxy } from "./serve.js";
-import type { Anthropic, Config, Log, LogLine, Paths, Provider, Routing } from "./services.js";
+import type { Anthropic, Config, Log, LogLine, Provider, Routing } from "./services.js";
 import { readSettings, type ProxySettings } from "./settings.js";
 
 const PROVIDER_CAPABILITY = "forebay.provider";
@@ -62,7 +62,7 @@ async function listening(routing: Routing, settings: ProxySettings, server: Serv
 async function started(context: PluginContext): Promise<Running> {
   const routing = required<Routing>(context, "routing");
   const anthropic = required<Anthropic>(context, "anthropic");
-  const settings = await readSettings(required<Config>(context, "weivel.config"), required<Paths>(context, "weivel.paths"));
+  const settings = await readSettings(required<Config>(context, "weivel.config"));
   const writeLog = logWriter(required<Log>(context, "weivel.log"));
   const limits = await routing.limits({});
   const providers = (): Provider[] => context.capabilities.all(context.capability<Provider>(PROVIDER_CAPABILITY));

@@ -13,7 +13,7 @@
     "consumes": ["forebay.provider"]
   },
   "services": {
-    "consumes": ["routing", "anthropic", "weivel.config", "weivel.paths", "weivel.log"]
+    "consumes": ["routing", "anthropic", "weivel.config", "weivel.log"]
   },
   "config": {
     "defaults": {

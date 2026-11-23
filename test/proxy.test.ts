@@ -45,15 +45,32 @@ function chainOfBoth(): Record<string, unknown> {
   return { routing: { modelMap: { sonnet: chain, default: chain } } };
 }
 
-/** The loader's ready record the run published: ready, or the refusal naming the plugin that did not start. */
 /** Every line the loader's log holds, readable once the run stopped and its writer wrote them. */
 function loggedIn(home: Home): string {
   const files = readdirSync(home.base, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".log"));
   return files.map((file) => readFileSync(join(home.base, file), "utf8")).join("\n");
 }
 
+/** The loader's ready record the run published: ready, or the refusal naming the plugin that did not start. */
 function readyRecord(home: Home): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home.base, "state", "processes", `${HOST_ID}.ready.json`), "utf8"));
+}
+
+function waited(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function listedIds(body: string): string[] {
+  return JSON.parse(body).data.map((model: { id: string }) => model.id);
+}
+
+/** Answers once the proxy on `port` answers its health check. */
+async function listening(port: number): Promise<void> {
+  for (;;) {
+    const answer = await sent(port, { method: "GET", path: "/health" }).catch(() => undefined);
+    if (answer?.status === 200) return;
+    await waited(20);
+  }
 }
 
 function providerInstall(id: string, mode: string, settings: Record<string, unknown> = {}): Install {
@@ -220,6 +237,45 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(loggedIn(run.home)).toContain("holds a NUL, so it cannot cross into C whole");
   }, RUN_BOUND);
 
+  it("makes a request arriving during an open round of the same providers wait for that round", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port), providerInstall("alpha", "plain", { emptyUntilAsk: "2", modelsDelay: "500" })]);
+
+    const before = await sent(port, { method: "GET", path: "/v1/models" });
+    await waited(3_100);
+    const messages = sent(port, { path: "/v1/messages", body: MESSAGES });
+    await waited(150);
+    const during = await sent(port, { method: "GET", path: "/v1/models" });
+
+    expect(listedIds(before.body)).toEqual([]);
+    expect(listedIds(during.body)).toEqual([MODEL]);
+    expect((await messages).status).toBe(200);
+  }, RUN_BOUND);
+
+  it("lets a change during an open round supersede it, whose waiters then wait for the new round", async () => {
+    const port = await freePort();
+    let activated = false;
+    // Ids that sort after the proxy's: runtime activates in that order, so the proxy listens before they activate.
+    const run = started([
+      proxyInstall(port),
+      providerInstall("zeta", "plain", { modelsDelay: "2500" }),
+      providerInstall("zulu", "plain", { model: "claude-haiku-4-5", activateDelay: "600", modelsDelay: "1800" }),
+    ]).then((running) => {
+      activated = true;
+      return running;
+    });
+    await listening(port);
+    await waited(100);
+    const sentBeforeTheChange = !activated;
+    const first = sent(port, { method: "GET", path: "/v1/models" });
+    await run;
+    const second = await sent(port, { method: "GET", path: "/v1/models" });
+
+    expect(sentBeforeTheChange).toBe(true);
+    expect(listedIds(second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(listedIds((await first).body)).toEqual([MODEL, "claude-haiku-4-5"]);
+  }, RUN_BOUND);
+
   it("lists the whole catalog to two requests arriving together while the first round is open", async () => {
     const port = await freePort();
     const slow = { modelsDelay: "300" };
@@ -308,6 +364,7 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
       refused: expect.stringContaining(`claude-code-proxy is enabled but did not start: its activate threw: port ${port} on 127.0.0.1 is already in use, so the proxy cannot listen; fix: stop what listens on port ${port}`),
       fix: "fix or disable claude-code-proxy",
     });
+    expect(readyRecord(run.home).refused).toContain(`set proxy.port in ${join(run.home.base, "application", "config", "claude-code-proxy.json")} to a free port`);
   }, RUN_BOUND);
 });
 

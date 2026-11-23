@@ -71,7 +71,7 @@ export interface StepArgument {
   readonly pass_through: number;
   readonly refreshed: number;
   readonly login_command: unknown;
-  readonly settings_file: string;
+  readonly settings_file: unknown;
   readonly report?: Report;
 }
 
@@ -124,6 +124,7 @@ export interface CatalogArgument {
   readonly round_closed?: number;
   readonly message?: string;
   readonly unasked?: number;
+  readonly changed?: number;
 }
 
 export interface CatalogAnswer {
@@ -145,7 +146,7 @@ export interface Routing {
   }): Promise<{ target: string; headers: readonly Pair[] }>;
   reply_headers(input: { argument: { headers: readonly Pair[]; rewritten: number } }): Promise<{ headers: readonly Pair[] }>;
   arrival(input: { argument: { path: string; headers: readonly Pair[]; port: number } }): Promise<ArrivalAnswer>;
-  port(input: { argument: { value: unknown; settings_file: string; failure?: { in_use: number; detail: string } } }): Promise<{ port: number; address: string }>;
+  port(input: { argument: { value: unknown; settings_file: unknown; failure?: { in_use: number; detail: string } } }): Promise<{ port: number; address: string }>;
   failure(input: { argument: { reason: number; upstream?: unknown; detail: string } }): Promise<FailureAnswer>;
   catalog(input: { argument: CatalogArgument }): Promise<CatalogAnswer>;
 }
@@ -220,10 +221,7 @@ export interface Provider {
 
 export interface Config {
   get_tree(input: { key: string }): Promise<unknown>;
-}
-
-export interface Paths {
-  config(input: Record<string, never>): Promise<string>;
+  settings_file(input: Record<string, never>): Promise<{ path: string } | symbol>;
 }
 
 export interface Log {

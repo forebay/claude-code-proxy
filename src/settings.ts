@@ -1,7 +1,4 @@
-import { join } from "node:path";
-import type { Config, Paths, RoutingProfile } from "./services.js";
-
-const SETTINGS_FILE_NAME = "config.json";
+import type { Config, RoutingProfile } from "./services.js";
 
 export interface ProxySettings {
   readonly upstream: unknown;
@@ -9,7 +6,7 @@ export interface ProxySettings {
   readonly placeholderAuthorization: unknown;
   readonly profile: RoutingProfile;
   readonly loginCommand: unknown;
-  readonly settingsFile: string;
+  readonly settingsFile: unknown;
   /** The settings record `model_map` reads the stored map from, `routing` as the config holds it. */
   readonly record: { readonly routing: unknown };
 }
@@ -38,7 +35,13 @@ function profileOf(routing: unknown): RoutingProfile {
   };
 }
 
-export async function readSettings(config: Config, paths: Paths): Promise<ProxySettings> {
+/** The file the config writes, which C names to the user; undefined when the config keeps its settings in none. */
+async function settingsFileOf(config: Config): Promise<unknown> {
+  const answer = await config.settings_file({});
+  return typeof answer === "symbol" ? undefined : answer.path;
+}
+
+export async function readSettings(config: Config): Promise<ProxySettings> {
   const routing = await settingOf(config, "routing");
   return {
     upstream: await settingOf(config, "upstream"),
@@ -46,7 +49,7 @@ export async function readSettings(config: Config, paths: Paths): Promise<ProxyS
     placeholderAuthorization: await settingOf(config, "proxy.placeholderAuthorization"),
     profile: profileOf(routing),
     loginCommand: member(routing, "loginCommand"),
-    settingsFile: join(await paths.config({}), SETTINGS_FILE_NAME),
+    settingsFile: await settingsFileOf(config),
     record: { routing },
   };
 }

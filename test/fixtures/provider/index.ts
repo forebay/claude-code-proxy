@@ -101,13 +101,19 @@ export default {
     const name = await text(config, "name");
     const model = await text(config, "model");
     const modelsDelay = Number(await optionalText(config, "modelsDelay"));
+    const emptyUntilAsk = Number(await optionalText(config, "emptyUntilAsk"));
+    const activateDelay = Number(await optionalText(config, "activateDelay"));
     const probe: Probe = { released: 0, releasedWhileReading: 0 };
+    let asks = 0;
     context.services.register(context.service(`${name}:probe`), probe);
+    if (activateDelay > 0) await waited(activateDelay);
     context.provide(context.capability("forebay.provider"), {
       async models() {
+        asks += 1;
         if (mode === "models-refused") throw new Error(`${name}\u0000broke`);
         if (modelsDelay > 0) await waited(modelsDelay);
-        return { provider: { provider: name, models: [{ id: model, name: model }], has_ranking: 0, default_model: model } };
+        const models = asks < emptyUntilAsk ? [] : [{ id: model, name: model }];
+        return { provider: { provider: name, models, has_ranking: 0, default_model: model } };
       },
       async handle(input: { argument: { request: { model: string } } }) {
         return handled(mode, name, input.argument.request);
