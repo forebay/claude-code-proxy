@@ -191,7 +191,8 @@ export interface RateLimitArgument {
   readonly reset_at: number;
   readonly now: number;
   readonly offset_minutes: number;
-  readonly zone: string;
+  readonly zone_en_us: string;
+  readonly zone_en_gb: string;
 }
 
 export interface Reply {
