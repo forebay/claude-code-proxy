@@ -81,8 +81,8 @@ interface Change {
 }
 
 /**
- * Starts zeta at once and zulu 600 ms later, sends a first `/v1/models` while only zeta is offered, and a second once
- * zulu is, which changes the list during the first request's round.
+ * Starts zeta at once and zulu 600 ms later unless its settings delay it otherwise, sends a first `/v1/models` while
+ * only zeta is offered, and a second once zulu is, which changes the list.
  */
 async function changedDuringARound(zeta: Record<string, unknown>, zulu: Record<string, unknown>): Promise<Change> {
   const port = await freePort();
@@ -301,6 +301,21 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(change.sentBeforeTheChange).toBe(true);
     expect(listedIds(change.second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
     expect(listedIds(after.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+  }, RUN_BOUND);
+
+  it("keeps the newer round's answer and slots when a round its budget closed answers late for a provider both ask", async () => {
+    const change = await changedDuringARound({ firstAskDelay: "4000", firstAskModel: "claude-opus-4-1", modelsDelay: "300" }, { activateDelay: "2600", modelsDelay: "300" });
+    const first = await change.first;
+    await waited(1_800);
+    const after = await sent(change.port, { method: "GET", path: "/v1/models" });
+    const haiku = await sent(change.port, { path: "/v1/messages", body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 16, messages: [{ role: "user", content: "hi" }] }) });
+
+    expect(change.sentBeforeTheChange).toBe(true);
+    expect(listedIds(first.body)).toEqual([]);
+    expect(listedIds(change.second.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(listedIds(after.body)).toEqual([MODEL, "claude-haiku-4-5"]);
+    expect(haiku.status, haiku.body).toBe(200);
+    expect(JSON.parse(haiku.body)).toMatchObject({ content: [{ type: "text", text: "served by zulu" }] });
   }, RUN_BOUND);
 
   it("lists the whole catalog to two requests arriving together while the first round is open", async () => {

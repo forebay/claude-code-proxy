@@ -167,8 +167,9 @@ export class Catalog {
   }
 
   /**
-   * @implNote A superseded round's answer is still reported, so a failure is warned, but never stored: for a provider
-   * the newer round also asks, that round's own answer is the one that counts.
+   * @implNote An older round's answer, closed or superseded, is still reported, so a failure is warned, but never
+   * stored or re-derived: for a provider the newer round also asks, that round's own answer is the one that counts,
+   * and a derivation over the older list would drop the newer providers' slots.
    */
   async #askedOne(round: Round, provider: Provider): Promise<void> {
     let models: CatalogProvider | undefined;
@@ -181,7 +182,7 @@ export class Catalog {
     const unasked = this.#round?.asked.includes(provider) === true ? 0 : 1;
     const facts = { failed: models === undefined ? 1 : 0, round_closed: round.closed ? 1 : 0, unasked, ...(message === undefined ? {} : { message }) };
     const answer = await this.#decided(CATALOG_EVENT.ANSWERED, round, facts);
-    if (answer === undefined || answer.drop === 1 || round.superseded) return;
+    if (answer === undefined || answer.drop === 1 || round !== this.#round) return;
     if (models !== undefined) this.#answers.set(provider, models);
     else if (answer.keep_last !== 1) this.#answers.delete(provider);
     if (answer.rederive === 1) await this.#rederived(round);
@@ -192,7 +193,7 @@ export class Catalog {
     round.closed = true;
     try {
       const answer = await this.#decided(CATALOG_EVENT.ROUND_CLOSED, round);
-      if (answer?.rederive === 1) await this.#rederived(round);
+      if (answer?.rederive === 1 && round === this.#round) await this.#rederived(round);
     } finally {
       this.#ended(round);
     }
