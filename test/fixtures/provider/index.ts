@@ -13,18 +13,18 @@ interface Context {
   readonly services: { get(service: unknown): unknown; register(service: unknown, object: object): unknown };
 }
 
-/** A stream the test provider answers: its events, how it ends, and, for one that hangs, what its release settles. */
+/** A stream the test provider answers: its events, how it ends, how long its last `next` waits, and whether one runs. */
 interface Stream {
   readonly events: object[];
   readonly failure: string | undefined;
-  readonly hangs: boolean;
-  released: boolean;
-  wake?: () => void;
+  readonly hangMilliseconds: number;
+  reading: boolean;
 }
 
 /** What the test reads of the provider through the service it registers. */
 interface Probe {
   released: number;
+  releasedWhileReading: number;
 }
 
 const TEXT = 1;
@@ -35,10 +35,19 @@ const EVENT = 1;
 const END = 2;
 const STREAM_FAILED = 3;
 
-async function text(config: Config, key: string): Promise<string> {
+async function optionalText(config: Config, key: string): Promise<string | undefined> {
   const answer = await config.get({ key });
-  if (typeof answer === "symbol" || answer.value.kind !== TEXT || answer.value.text === null) throw new Error(`the test provider's setting ${key} holds no text`);
-  return answer.value.text;
+  return typeof answer === "symbol" || answer.value.kind !== TEXT || answer.value.text === null ? undefined : answer.value.text;
+}
+
+async function text(config: Config, key: string): Promise<string> {
+  const value = await optionalText(config, key);
+  if (value === undefined) throw new Error(`the test provider's setting ${key} holds no text`);
+  return value;
+}
+
+function waited(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function streamed(model: string, text: string): object[] {
@@ -52,8 +61,8 @@ function streamed(model: string, text: string): object[] {
   ];
 }
 
-function stream(events: object[], failure: string | undefined, hangs = false): object {
-  return { kind: STREAM, stream: { events, failure, hangs, released: false } satisfies Stream };
+function stream(events: object[], failure: string | undefined, hangMilliseconds = 0): object {
+  return { kind: STREAM, stream: { events, failure, hangMilliseconds, reading: false } satisfies Stream };
 }
 
 function handled(mode: string, name: string, request: { model: string }): object {
@@ -70,15 +79,18 @@ function handled(mode: string, name: string, request: { model: string }): object
   }
   if (mode === "stream") return stream(streamed(request.model, `streamed by ${name}`), undefined);
   if (mode === "stream-fails-first") return stream([], `${name} broke before its first event`);
-  if (mode === "hang") return stream(streamed(request.model, "first").slice(0, 3), undefined, true);
+  if (mode === "hang") return stream(streamed(request.model, "first").slice(0, 3), undefined, 500);
   return stream(streamed(request.model, "partial").slice(0, 3), `${name} broke mid stream`);
 }
 
+/** @implNote A hanging stream's last `next` settles on its own after its wait, as a provider bounds its upstream wait. */
 async function next(input: { stream: Stream }): Promise<object> {
   const { stream } = input;
   const event = stream.events.shift();
   if (event !== undefined) return { kind: EVENT, event };
-  if (stream.hangs && !stream.released) await new Promise<void>((resolve) => (stream.wake = resolve));
+  stream.reading = true;
+  await waited(stream.hangMilliseconds);
+  stream.reading = false;
   return stream.failure === undefined ? { kind: END } : { kind: STREAM_FAILED, failure: stream.failure };
 }
 
@@ -88,10 +100,13 @@ export default {
     const mode = await text(config, "mode");
     const name = await text(config, "name");
     const model = await text(config, "model");
-    const probe: Probe = { released: 0 };
+    const modelsDelay = Number(await optionalText(config, "modelsDelay"));
+    const probe: Probe = { released: 0, releasedWhileReading: 0 };
     context.services.register(context.service(`${name}:probe`), probe);
     context.provide(context.capability("forebay.provider"), {
       async models() {
+        if (mode === "models-refused") throw new Error(`${name}\u0000broke`);
+        if (modelsDelay > 0) await waited(modelsDelay);
         return { provider: { provider: name, models: [{ id: model, name: model }], has_ranking: 0, default_model: model } };
       },
       async handle(input: { argument: { request: { model: string } } }) {
@@ -99,9 +114,8 @@ export default {
       },
       next,
       release_stream(input: { stream: Stream }) {
-        input.stream.released = true;
-        input.stream.wake?.();
         probe.released += 1;
+        if (input.stream.reading) probe.releasedWhileReading += 1;
       },
     });
   },

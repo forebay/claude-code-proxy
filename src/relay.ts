@@ -17,12 +17,22 @@ export class Relay {
     this.#signal = signal;
   }
 
-  /** Reads a provider's stream to its end or its failure, answering the report for `step`, or undefined once the client went away. */
+  /**
+   * Reads a provider's stream to its end or its failure through an encoder of its own, answering the report for
+   * `step`, or undefined once the client went away.
+   *
+   * @implNote A stream is read by one thread at a time, so once the client went away the stream is released only
+   * after the `next` still running on it has settled, and no `next` follows.
+   */
   async relayed(provider: Provider, stream: unknown): Promise<Report | undefined> {
+    let pending: Promise<ProviderNextAnswer> | undefined;
     try {
+      this.#encoder ??= await this.#anthropic.stream_encoder_open({});
       while (!this.#signal.aborted) {
-        const next = await this.#nextOf(provider, stream);
+        pending = nextOf(provider, stream);
+        const next = await this.#unlessGone(pending);
         if (next === undefined) return undefined;
+        pending = undefined;
         if (next.kind === PROVIDER_NEXT.EVENT) {
           await this.#written((encoder) => this.#anthropic.stream_encode({ argument: { encoder, events: [next.event] } }));
         } else if (next.kind === PROVIDER_NEXT.END) {
@@ -36,7 +46,8 @@ export class Relay {
       }
       return undefined;
     } finally {
-      released(provider, stream);
+      await pending;
+      await released(provider, stream);
     }
   }
 
@@ -55,14 +66,13 @@ export class Relay {
     this.#encoder = undefined;
   }
 
-  /** The provider's next answer, or undefined once the client went away while it was awaited. */
-  async #nextOf(provider: Provider, stream: unknown): Promise<ProviderNextAnswer | undefined> {
+  /** What `pending` answers, or undefined as soon as the client went away. */
+  async #unlessGone(pending: Promise<ProviderNextAnswer>): Promise<ProviderNextAnswer | undefined> {
     let abandon = (): void => undefined;
     const gone = new Promise<undefined>((resolve) => (abandon = () => resolve(undefined)));
     this.#signal.addEventListener("abort", abandon, { once: true });
-    const next = provider.next({ stream }).catch((error: unknown) => ({ kind: PROVIDER_NEXT.FAILURE, failure: error instanceof Error ? error.message : String(error) }));
     try {
-      const answer = await Promise.race([next, gone]);
+      const answer = await Promise.race([pending, gone]);
       return this.#signal.aborted ? undefined : answer;
     } finally {
       this.#signal.removeEventListener("abort", abandon);
@@ -92,12 +102,20 @@ export class Relay {
   }
 }
 
+function nextOf(provider: Provider, stream: unknown): Promise<ProviderNextAnswer> {
+  return provider.next({ stream }).catch((error: unknown) => ({ kind: PROVIDER_NEXT.FAILURE, failure: error instanceof Error ? error.message : String(error) }));
+}
+
 /** Frees the stream through the contract's `release_stream` when the provider offers it, or a handle's own release. */
-function released(provider: Provider, stream: unknown): void {
-  if (typeof provider.release_stream === "function") {
-    provider.release_stream({ stream });
-    return;
+async function released(provider: Provider, stream: unknown): Promise<void> {
+  try {
+    if (typeof provider.release_stream === "function") {
+      await provider.release_stream({ stream });
+      return;
+    }
+    const release = (stream as { release?: unknown } | null)?.release;
+    if (typeof release === "function") release.call(stream);
+  } catch {
+    // A release that fails leaves this consumer nothing more to free.
   }
-  const release = (stream as { release?: unknown } | null)?.release;
-  if (typeof release === "function") release.call(stream);
 }

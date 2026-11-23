@@ -1,4 +1,4 @@
-import { CATALOG_ACTION, CATALOG_EVENT } from "./kinds.js";
+import { CATALOG_ACTION, CATALOG_EVENT, LOG_LEVEL } from "./kinds.js";
 import type { CatalogAnswer, CatalogArgument, CatalogProvider, LogLine, Provider, Routing, RoutingProfile, Slot } from "./services.js";
 
 /** What routing reads of the providers as of their last answers. */
@@ -52,19 +52,23 @@ export class Catalog {
   readonly #answers = new Map<Provider, CatalogProvider>();
   readonly #timer: NodeJS.Timeout;
   #round: Round | undefined;
+  #settled: readonly Provider[] = [];
   #lastAsked = 0;
   #slots: readonly Slot[] = [];
   #stopped = false;
 
   constructor(options: CatalogOptions) {
     this.#options = options;
-    this.#timer = setInterval(() => void this.#happened(CATALOG_EVENT.PERIOD).catch(() => undefined), options.refreshEveryMilliseconds);
+    this.#timer = setInterval(() => this.#logged(this.#happened(CATALOG_EVENT.PERIOD)), options.refreshEveryMilliseconds);
     this.#timer.unref();
   }
 
-  /** The snapshot, once the round a change of the implementations started or joined has closed. */
+  /**
+   * The snapshot, once the round C answers for the implementations differing from those the last closed round asked
+   * has closed; a request arriving while that round is open reports the same and waits as C answers.
+   */
   async current(): Promise<Snapshot> {
-    if (!isSameList(this.#options.providers(), this.#round?.asked ?? [])) await this.#happened(CATALOG_EVENT.PROVIDERS_CHANGED);
+    if (!isSameList(this.#options.providers(), this.#settled)) await this.#happened(CATALOG_EVENT.PROVIDERS_CHANGED);
     return this.#snapshot();
   }
 
@@ -93,13 +97,35 @@ export class Catalog {
     };
   }
 
+  /** C's answer to the event, or undefined once stopped or when C refused it, which is logged and ends the open round. */
   async #decided(event: number, facts: EventFacts = {}): Promise<CatalogAnswer | undefined> {
     if (this.#stopped) return undefined;
     const round = this.#round;
     const argument = { event, now: this.#options.now(), asked: round === undefined ? 0 : 1, last_asked: this.#lastAsked, asking: round !== undefined && !round.closed ? 1 : 0, ...facts };
-    const answer = await this.#options.routing.catalog({ argument });
-    this.#options.writeLog(answer.log);
-    return answer;
+    try {
+      const answer = await this.#options.routing.catalog({ argument });
+      this.#options.writeLog(answer.log);
+      return answer;
+    } catch (error) {
+      this.#warn(error);
+      if (round !== undefined) this.#ended(round);
+      return undefined;
+    }
+  }
+
+  #warn(error: unknown): void {
+    const { detail } = error as { detail?: unknown };
+    this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: typeof detail === "string" ? detail : messageOf(error) }]);
+  }
+
+  #logged(work: Promise<unknown>): void {
+    work.catch((error: unknown) => this.#warn(error));
+  }
+
+  #ended(round: Round): void {
+    round.closed = true;
+    if (this.#round === round) this.#settled = round.asked;
+    round.finish();
   }
 
   async #happened(event: number): Promise<void> {
@@ -114,9 +140,9 @@ export class Catalog {
     const round = newRound(providers);
     this.#round = round;
     this.#lastAsked = this.#options.now();
-    const budget = setTimeout(() => void this.#closed(round), budgetMilliseconds);
+    const budget = setTimeout(() => this.#logged(this.#closed(round)), budgetMilliseconds);
     budget.unref();
-    void Promise.all(providers.map((provider) => this.#askedOne(round, provider))).then(() => this.#closed(round));
+    this.#logged(Promise.all(providers.map((provider) => this.#askedOne(round, provider))).then(() => this.#closed(round)));
     return round.done.finally(() => clearTimeout(budget));
   }
 
@@ -130,7 +156,7 @@ export class Catalog {
     }
     const unasked = this.#round?.asked.includes(provider) === true ? 0 : 1;
     const facts = { failed: models === undefined ? 1 : 0, round_closed: round.closed ? 1 : 0, unasked, ...(message === undefined ? {} : { message }) };
-    const answer = await this.#decided(CATALOG_EVENT.ANSWERED, facts).catch(() => undefined);
+    const answer = await this.#decided(CATALOG_EVENT.ANSWERED, facts);
     if (answer === undefined || answer.drop === 1) return;
     if (models !== undefined) this.#answers.set(provider, models);
     else if (answer.keep_last !== 1) this.#answers.delete(provider);
@@ -144,7 +170,7 @@ export class Catalog {
       const answer = await this.#decided(CATALOG_EVENT.ROUND_CLOSED);
       if (answer?.rederive === 1) await this.#rederived();
     } finally {
-      round.finish();
+      this.#ended(round);
     }
   }
 

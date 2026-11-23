@@ -48,7 +48,7 @@ export function writeBody(response: ServerResponse, status: number, headers: rea
 
 /**
  * @implNote The rest of the body is read and dropped first, since closing over unread data resets the connection and
- * loses the reply; the connection is then closed, as the host could not read the request to its end in time.
+ * loses the reply; the connection is then closed rather than kept for another request, since this one was refused.
  */
 export function drainedUnread(incoming: IncomingMessage, response: ServerResponse): Promise<void> {
   response.setHeader("connection", "close");

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,11 +46,17 @@ function chainOfBoth(): Record<string, unknown> {
 }
 
 /** The loader's ready record the run published: ready, or the refusal naming the plugin that did not start. */
+/** Every line the loader's log holds, readable once the run stopped and its writer wrote them. */
+function loggedIn(home: Home): string {
+  const files = readdirSync(home.base, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".log"));
+  return files.map((file) => readFileSync(join(home.base, file), "utf8")).join("\n");
+}
+
 function readyRecord(home: Home): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home.base, "state", "processes", `${HOST_ID}.ready.json`), "utf8"));
 }
 
-function providerInstall(id: string, mode: string): Install {
+function providerInstall(id: string, mode: string, settings: Record<string, unknown> = {}): Install {
   const manifest = {
     api: 1,
     importName: id,
@@ -61,7 +67,7 @@ function providerInstall(id: string, mode: string): Install {
     services: { consumes: ["weivel.config"], provides: [`${id}:probe`] },
     config: { defaults: {} },
   };
-  return { manifest, bundle: providerBundle, settings: { mode, name: id, model: MODEL } };
+  return { manifest, bundle: providerBundle, settings: { mode, name: id, model: MODEL, ...settings } };
 }
 
 async function started(installs: readonly Install[]): Promise<Running> {
@@ -194,7 +200,37 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
 
     await abandonedAfterFirstBytes(port, { path: "/v1/messages", body: STREAMED_MESSAGES });
 
-    await expect.poll(() => run.host.service<{ released: number }>("alpha", "alpha:probe")?.released, { timeout: 5_000 }).toBe(1);
+    const probe = (): { released: number; releasedWhileReading: number } | undefined => run.host.service("alpha", "alpha:probe");
+    expect(probe()?.released).toBe(0);
+    await expect.poll(() => probe()?.released, { timeout: 5_000 }).toBe(1);
+    expect(probe()?.releasedWhileReading).toBe(0);
+  }, RUN_BOUND);
+
+  it("logs a catalog decision C refuses, ends that round and keeps serving", async () => {
+    const port = await freePort();
+    const run = await started([proxyInstall(port), providerInstall("alpha", "models-refused")]);
+
+    const listed = await sent(port, { method: "GET", path: "/v1/models" });
+    const health = await sent(port, { method: "GET", path: "/health" });
+    await run.host.stop();
+
+    expect(listed.status).toBe(200);
+    expect(JSON.parse(listed.body)).toMatchObject({ data: [] });
+    expect(health).toMatchObject({ status: 200, body: "ok" });
+    expect(loggedIn(run.home)).toContain("holds a NUL, so it cannot cross into C whole");
+  }, RUN_BOUND);
+
+  it("lists the whole catalog to two requests arriving together while the first round is open", async () => {
+    const port = await freePort();
+    const slow = { modelsDelay: "300" };
+    await started([proxyInstall(port), providerInstall("alpha", "plain", slow), providerInstall("beta", "plain", { ...slow, model: "claude-haiku-4-5" })]);
+
+    const answers = await Promise.all([sent(port, { method: "GET", path: "/v1/models" }), sent(port, { method: "GET", path: "/v1/models" })]);
+
+    for (const answer of answers) {
+      expect(answer.status).toBe(200);
+      expect(JSON.parse(answer.body).data.map((model: { id: string }) => model.id)).toEqual([MODEL, "claude-haiku-4-5"]);
+    }
   }, RUN_BOUND);
 
   it("falls to the next provider when a stream fails before its first byte", async () => {
