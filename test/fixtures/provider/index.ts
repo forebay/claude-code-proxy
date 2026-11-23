@@ -25,6 +25,7 @@ interface Stream {
 interface Probe {
   released: number;
   releasedWhileReading: number;
+  asks: number;
 }
 
 const TEXT = 1;
@@ -105,13 +106,14 @@ export default {
     const activateDelay = Number(await optionalText(config, "activateDelay"));
     const firstAskDelay = Number(await optionalText(config, "firstAskDelay"));
     const firstAskModel = (await optionalText(config, "firstAskModel")) ?? model;
-    const probe: Probe = { released: 0, releasedWhileReading: 0 };
+    const probe: Probe = { released: 0, releasedWhileReading: 0, asks: 0 };
     let asks = 0;
     context.services.register(context.service(`${name}:probe`), probe);
     if (activateDelay > 0) await waited(activateDelay);
     context.provide(context.capability("forebay.provider"), {
       async models() {
         asks += 1;
+        probe.asks = asks;
         const first = asks === 1;
         if (mode === "models-refused") throw new Error(`${name}\u0000broke`);
         const delay = first && firstAskDelay > 0 ? firstAskDelay : modelsDelay;

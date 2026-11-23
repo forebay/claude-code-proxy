@@ -45,7 +45,8 @@ export class Catalog {
   readonly #timers = new Map<string, NodeJS.Timeout>();
   readonly #parked = new Map<number, (() => void)[]>();
   readonly #names = new WeakMap<Provider, string>();
-  readonly #byName = new Map<string, Provider>();
+  #byName = new Map<string, Provider>();
+  #named = 0;
   #released = false;
 
   private constructor(options: CatalogOptions, handle: Handle) {
@@ -82,24 +83,34 @@ export class Catalog {
     this.#handle.release();
   }
 
-  /** The names of the implementations offered now, in order, each named once for as long as it lives. */
+  /**
+   * The names of the implementations offered now, in order, each named once for as long as it lives.
+   * @implNote Only the implementations offered now are held by name, so one that left can be collected.
+   */
   #offered(): string[] {
-    return this.#options.providers().map((provider) => {
+    const offered = this.#options.providers().map((provider) => {
       let name = this.#names.get(provider);
       if (name === undefined) {
-        name = `implementation-${this.#byName.size + 1}`;
+        this.#named += 1;
+        name = `implementation-${this.#named}`;
         this.#names.set(provider, name);
-        this.#byName.set(name, provider);
       }
-      return name;
+      return [name, provider] as const;
     });
+    this.#byName = new Map(offered);
+    return offered.map(([name]) => name);
   }
 
   async #read(): Promise<Snapshot> {
     if (this.#released) throw new Error("the catalog was released, so the proxy is stopping");
     const read = await this.#options.routing.catalog_read({ argument: { catalog: this.#handle } });
-    const providers = read.providers.map((answer, index) => [answer.provider, this.#byName.get(read.implementations[index]!)!] as const);
-    return { names: providers.map(([name]) => name), byName: new Map(providers), catalog: read.providers, slots: read.slots, entries: read.entries };
+    const names = read.providers.map((answer) => answer.provider);
+    const byName = new Map<string, Provider>();
+    read.implementations.forEach((implementation, index) => {
+      const provider = this.#byName.get(implementation);
+      if (provider !== undefined) byName.set(names[index]!, provider);
+    });
+    return { names, byName, catalog: read.providers, slots: read.slots, entries: read.entries };
   }
 
   async #requested(kind: number): Promise<void> {
@@ -111,6 +122,7 @@ export class Catalog {
       this.#warn(error);
       return;
     }
+    if (this.#released) return;
     const waited = answer.wait_round === 0 ? undefined : this.#waitedOn(answer.wait_round);
     this.#acted(answer);
     await waited;
@@ -121,6 +133,7 @@ export class Catalog {
   }
 
   #waitedOn(round: number): Promise<void> {
+    if (this.#released) return Promise.resolve();
     return new Promise((resume) => {
       const waiters = this.#parked.get(round) ?? [];
       waiters.push(resume);
@@ -129,6 +142,7 @@ export class Catalog {
   }
 
   #acted(answer: CatalogEventAnswer): void {
+    if (this.#released) return;
     this.#options.writeLog(answer.log);
     this.#timed(answer.timers);
     for (const implementation of answer.asks) void this.#asked(answer.ask_round, implementation);
@@ -160,12 +174,15 @@ export class Catalog {
   async #fired(kind: number, round: number): Promise<void> {
     if (this.#released) return;
     const facts = kind === CATALOG_TIMER.PERIOD ? { implementations: this.#offered() } : {};
+    let answer: CatalogEventAnswer;
     try {
-      this.#acted(await this.#event({ kind: CATALOG_EVENT.TIMER, timer: kind, round, ...facts }));
+      answer = await this.#event({ kind: CATALOG_EVENT.TIMER, timer: kind, round, ...facts });
     } catch (error) {
       this.#warn(error);
       if (isOutOfMemory(error)) setImmediate(() => void this.#fired(kind, round));
+      return;
     }
+    if (!this.#released) this.#acted(answer);
   }
 
   /** @implNote A refused ANSWERED is only logged: its round closes at its own round close timer. */
@@ -178,14 +195,21 @@ export class Catalog {
       facts = { kind: CATALOG_EVENT.ANSWERED, round, implementation, failed: 1, message: messageOf(error) };
     }
     if (this.#released) return;
+    let answer: CatalogEventAnswer;
     try {
-      this.#acted(await this.#event(facts));
+      answer = await this.#event(facts);
     } catch (error) {
       this.#warn(error);
+      return;
     }
+    if (!this.#released) this.#acted(answer);
   }
 
   #warn(error: unknown): void {
-    this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: messageOf(error) }]);
+    try {
+      this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: messageOf(error) }]);
+    } catch {
+      // A warning that cannot be written must not turn a handled refusal into an unhandled rejection.
+    }
   }
 }

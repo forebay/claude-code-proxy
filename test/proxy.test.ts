@@ -318,6 +318,24 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(JSON.parse(haiku.body)).toMatchObject({ content: [{ type: "text", text: "served by zulu" }] });
   }, RUN_BOUND);
 
+  it("settles a request waiting on an open round when the proxy deactivates, and starts no ask after", async () => {
+    const port = await freePort();
+    const run = await started([proxyInstall(port), providerInstall("alpha", "plain", { modelsDelay: "3000" })]);
+    const probe = run.host.service<{ asks: number }>("alpha", "alpha:probe")!;
+
+    const waiting = sent(port, { method: "GET", path: "/v1/models" }).then(
+      () => "settled",
+      () => "settled",
+    );
+    await expect.poll(() => probe.asks).toBe(1);
+    await run.host.stop();
+    const outcome = await Promise.race([waiting, waited(2_000).then(() => "hung")]);
+    await waited(3_500);
+
+    expect(outcome).toBe("settled");
+    expect(probe.asks).toBe(1);
+  }, RUN_BOUND);
+
   it("lists the whole catalog to two requests arriving together while the first round is open", async () => {
     const port = await freePort();
     const slow = { modelsDelay: "300" };
