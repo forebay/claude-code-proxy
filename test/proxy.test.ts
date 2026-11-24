@@ -3,9 +3,10 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHost, type RunningHost } from "@weivel/typescript/program";
+import { freePort } from "@weivel/typescript/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { abandonedAfterFirstBytes, sent, type Answer } from "./fixtures/client.js";
-import { bundled, freePort, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { abandonedAfterFirstBytes, pending, sent, type Answer } from "./fixtures/client.js";
+import { bundled, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -71,6 +72,13 @@ async function listening(port: number): Promise<void> {
     if (answer?.status === 200) return;
     await waited(20);
   }
+}
+
+/** What the test provider records of the calls made to it. */
+interface CallProbe {
+  readonly cancelled: number;
+  readonly handledTokens: readonly bigint[];
+  readonly cancelledTokens: readonly bigint[];
 }
 
 interface Change {
@@ -276,6 +284,45 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(probe()?.released).toBe(0);
     await expect.poll(() => probe()?.released, { timeout: 5_000 }).toBe(1);
     expect(probe()?.releasedWhileReading).toBe(0);
+  }, RUN_BOUND);
+
+  it("cancels the provider's pending call by its token when the client goes away", async () => {
+    const port = await freePort();
+    const run = await started([proxyInstall(port), providerInstall("alpha", "hang-handle")]);
+    const probe = (): CallProbe | undefined => run.host.service("alpha", "alpha:probe");
+
+    const request = pending(port, { path: "/v1/messages", body: MESSAGES });
+    await expect.poll(() => probe()?.handledTokens.length, { timeout: 10_000 }).toBe(1);
+    expect(probe()?.cancelled).toBe(0);
+    await request.abandon();
+
+    await expect.poll(() => probe()?.cancelled, { timeout: 5_000 }).toBe(1);
+    expect(typeof probe()?.handledTokens[0]).toBe("bigint");
+    expect(probe()?.cancelledTokens).toEqual(probe()?.handledTokens);
+  }, RUN_BOUND);
+
+  it("hands each call to a provider a token of its own", async () => {
+    const port = await freePort();
+    const run = await started([proxyInstall(port), providerInstall("alpha", "plain")]);
+    const probe = (): CallProbe | undefined => run.host.service("alpha", "alpha:probe");
+
+    await sent(port, { path: "/v1/messages", body: MESSAGES });
+    await sent(port, { path: "/v1/messages", body: MESSAGES });
+
+    const tokens = probe()?.handledTokens ?? [];
+    expect(tokens).toHaveLength(2);
+    expect(tokens[0]).not.toBe(tokens[1]);
+    expect(probe()?.cancelled).toBe(0);
+  }, RUN_BOUND);
+
+  it("names the loader's login command when no provider offers the model", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port), providerInstall("alpha", "plain", { emptyUntilAsk: "1000" })]);
+
+    const answer = await sent(port, { path: "/v1/messages", body: MESSAGES });
+
+    expect(answer.status, answer.body).toBe(503);
+    expect(JSON.parse(answer.body).error.message).toContain("log a provider in with spisor-host action claude-code-loader alpha login");
   }, RUN_BOUND);
 
   it("logs an answer C refuses and keeps serving once that round's own timer closes it", async () => {

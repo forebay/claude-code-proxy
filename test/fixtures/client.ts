@@ -42,3 +42,22 @@ export function abandonedAfterFirstBytes(port: number, what: Sent): Promise<void
     outgoing.end(what.body);
   });
 }
+
+export interface Pending {
+  /** Goes away before any answer arrived, answering once the connection closed. */
+  abandon(): Promise<void>;
+}
+
+/** Sends `what` and holds the request open until it is abandoned. */
+export function pending(port: number, what: Sent): Pending {
+  const outgoing = request({ host: "127.0.0.1", port, method: what.method ?? "POST", path: what.path, headers: { "content-type": "application/json", ...what.headers } });
+  const closed = new Promise<void>((resolve) => outgoing.on("close", () => resolve()));
+  outgoing.on("error", () => undefined);
+  outgoing.end(what.body);
+  return {
+    abandon() {
+      outgoing.destroy();
+      return closed;
+    },
+  };
+}

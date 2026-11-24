@@ -30,7 +30,7 @@
         "nativeModelPattern": "^claude-",
         "defaultContext": 200000,
         "defaultOutput": 64000,
-        "loginCommand": "forebay-host action claude-code"
+        "loginCommand": "spisor-host action claude-code-loader"
       }
     }
   },

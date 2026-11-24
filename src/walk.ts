@@ -28,6 +28,7 @@ interface Exchange {
   readonly request: Request;
   readonly response: ServerResponse;
   readonly relay: Relay;
+  readonly signal: AbortSignal;
   snapshot: Snapshot;
   refreshed: boolean;
   failureBody?: string;
@@ -60,11 +61,28 @@ async function stepped(exchange: Exchange, walk?: Handle, report?: Report): Prom
   return answer;
 }
 
+function drawnToken(): bigint {
+  return crypto.getRandomValues(new BigUint64Array(1))[0]!;
+}
+
+/** Asks the provider to end the call `token` names; a cancel that fails leaves this consumer nothing more to end. */
+function cancelCall(provider: Provider, token: bigint): void {
+  Promise.resolve()
+    .then(() => provider.cancel({ argument: { token } }))
+    .catch(() => undefined);
+}
+
+/** Serves the request through `provider`, cancelling the call by its token if the client goes while it runs. */
 async function handled(exchange: Exchange, provider: Provider, model: string): Promise<ProviderHandleAnswer> {
+  const token = drawnToken();
+  const cancel = (): void => cancelCall(provider, token);
+  exchange.signal.addEventListener("abort", cancel, { once: true });
   try {
-    return await provider.handle({ argument: { request: { ...exchange.request.ir, model }, headers: exchange.request.headers } });
+    return await provider.handle({ argument: { request: { ...exchange.request.ir, model }, headers: exchange.request.headers, token } });
   } catch (error) {
     return { kind: PROVIDER_HANDLE.THROWN, message: messageOf(error) };
+  } finally {
+    exchange.signal.removeEventListener("abort", cancel);
   }
 }
 
@@ -137,7 +155,7 @@ async function performed(exchange: Exchange, answer: StepAnswer): Promise<Report
  * holds only the calls, the I/O and their order.
  */
 export async function walk(walker: Walker, request: Request, response: ServerResponse, signal: AbortSignal): Promise<void> {
-  const exchange: Exchange = { walker, request, response, relay: new Relay(walker.anthropic, response, signal), snapshot: await walker.catalog.current(), refreshed: false };
+  const exchange: Exchange = { walker, request, response, relay: new Relay(walker.anthropic, response, signal), signal, snapshot: await walker.catalog.current(), refreshed: false };
   let answer = await stepped(exchange);
   try {
     while (answer.kind !== STEP.DONE && !signal.aborted) {
