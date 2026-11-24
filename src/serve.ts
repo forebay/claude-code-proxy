@@ -72,7 +72,7 @@ async function routed(proxy: Proxy, incoming: IncomingMessage, response: ServerR
   const request = route.kind === ROUTE.MESSAGES ? await decoded(proxy, incoming, body, response) : { headers: pairsOf(incoming.headers), model: null, passThrough: true };
   if (request === undefined) return;
   const { upstream, placeholderAuthorization } = proxy.settings;
-  const through = { routing: proxy.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, writeLog: proxy.writeLog };
+  const through = { routing: proxy.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, keyHeaders: route.key_headers ?? [], writeLog: proxy.writeLog };
   const walker = { routing: proxy.routing, anthropic: proxy.anthropic, settings: proxy.settings, catalog: proxy.catalog, writeLog: proxy.writeLog, passThrough: () => passThrough(through, incoming, body, response, signal) };
   await walk(walker, request, response, signal);
 }

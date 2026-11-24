@@ -9,6 +9,7 @@ export interface PassThrough {
   readonly anthropic: Anthropic;
   readonly upstream: unknown;
   readonly placeholderAuthorization: unknown;
+  readonly keyHeaders: readonly string[];
   readonly writeLog: (lines: readonly LogLine[]) => void;
 }
 
@@ -33,7 +34,14 @@ async function unreachable(through: PassThrough, response: ServerResponse, error
 
 /** Sends the request upstream undecoded, to the target and with the headers C answers, and its answer back as it came. */
 export async function passThrough(through: PassThrough, request: IncomingMessage, body: Buffer, response: ServerResponse, signal: AbortSignal): Promise<void> {
-  const argument = { upstream: through.upstream, url: request.url!, headers: pairsOf(request.headers), body_length: body.length, placeholder_authorization: through.placeholderAuthorization };
+  const argument = {
+    upstream: through.upstream,
+    url: request.url!,
+    headers: pairsOf(request.headers),
+    body_length: body.length,
+    placeholder_authorization: through.placeholderAuthorization,
+    placeholder_key_headers: through.keyHeaders,
+  };
   const routed = await through.routing.pass_through({ argument });
   const answered = await sent(routed.target, request.method!, routed.headers, body, signal);
   if (signal.aborted) return;

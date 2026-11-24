@@ -159,7 +159,14 @@ export interface Routing {
   step(input: { argument: StepArgument }): Promise<StepAnswer>;
   limits(input: Record<string, never>): Promise<LimitsAnswer>;
   pass_through(input: {
-    argument: { upstream: unknown; url: string; headers: readonly Pair[]; body_length: number; placeholder_authorization: unknown };
+    argument: {
+      upstream: unknown;
+      url: string;
+      headers: readonly Pair[];
+      body_length: number;
+      placeholder_authorization: unknown;
+      placeholder_key_headers: readonly string[];
+    };
   }): Promise<{ target: string; headers: readonly Pair[] }>;
   reply_headers(input: { argument: { headers: readonly Pair[]; rewritten: number } }): Promise<{ headers: readonly Pair[] }>;
   arrival(input: { argument: { path: string; headers: readonly Pair[]; port: number } }): Promise<ArrivalAnswer>;
@@ -201,8 +208,15 @@ export interface Reply {
   readonly body: string;
 }
 
+/** The route C chose; `key_headers` names the headers a passed-through request carries a key in. */
+export interface RouteAnswer {
+  readonly kind: number;
+  readonly model_id?: string;
+  readonly key_headers?: readonly string[];
+}
+
 export interface Anthropic {
-  route_request(input: { argument: { method: string; path: string } }): Promise<{ kind: number; model_id?: string }>;
+  route_request(input: { argument: { method: string; path: string } }): Promise<RouteAnswer>;
   decode_request(input: { argument: { bytes: Uint8Array; headers: readonly Pair[] } }): Promise<DecodedRequest>;
   encode_response(input: { argument: { response: unknown } }): Promise<Body>;
   stream_encoder_open(input: Record<string, never>): Promise<Handle>;

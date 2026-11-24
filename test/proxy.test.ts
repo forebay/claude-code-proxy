@@ -231,6 +231,29 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(upstream.received[0]?.headers.authorization).toBeUndefined();
   }, RUN_BOUND);
 
+  it.each([
+    ["the whole placeholder", "Bearer sk-ant-loader-proxy"],
+    ["the bare key", "sk-ant-loader-proxy"],
+  ])("passes a request through without an x-api-key carrying %s", async (_form, key) => {
+    const port = await freePort();
+    await started([proxyInstall(port), providerInstall("alpha", "plain")]);
+
+    const answer = await sent(port, { method: "POST", path: "/v1/messages/count_tokens", headers: { "x-api-key": key }, body: MESSAGES });
+
+    expect(answer.status, answer.body).toBe(200);
+    expect(upstream.received).toHaveLength(1);
+    expect(upstream.received[0]?.headers["x-api-key"]).toBeUndefined();
+  }, RUN_BOUND);
+
+  it("passes a request through with an x-api-key that is not the placeholder", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port), providerInstall("alpha", "plain")]);
+
+    await sent(port, { method: "POST", path: "/v1/messages/count_tokens", headers: { "x-api-key": "sk-ant-own-key" }, body: MESSAGES });
+
+    expect(upstream.received[0]?.headers["x-api-key"]).toBe("sk-ant-own-key");
+  }, RUN_BOUND);
+
   it("ends a stream that fails after bytes went out with an Anthropic error event", async () => {
     const port = await freePort();
     await started([proxyInstall(port), providerInstall("alpha", "stream-fails"), providerInstall("beta", "plain")]);
