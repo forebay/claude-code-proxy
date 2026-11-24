@@ -55,6 +55,10 @@ export async function passThrough(through: PassThrough, request: IncomingMessage
   await new Promise<void>((resolve) => {
     upstream.pipe(response);
     upstream.on("end", () => resolve());
+    upstream.on("close", () => {
+      if (!upstream.readableEnded) response.destroy();
+      resolve();
+    });
     upstream.on("error", () => {
       response.destroy();
       resolve();
