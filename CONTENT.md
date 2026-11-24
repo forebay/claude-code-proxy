@@ -15,6 +15,8 @@ capability by id through its context, and reads its settings and writes its log 
   messages body is decoded by `anthropic.decode_request`, and every other request is walked as a pass-through with
   the key headers the route names.
 - `src/walk.ts`: the loop, `routing.step` until it answers done, performing each step and reporting how it went.
+  Each provider call carries a random token, and the provider's `cancel` is called with it when the client goes away
+  before `handle` answered.
 - `src/relay.ts`: a provider's stream through `anthropic.stream_encode`, one encoder per provider, and the error event
   C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
   offers one, a client going away included.
