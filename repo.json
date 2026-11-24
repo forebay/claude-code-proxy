@@ -17,7 +17,7 @@
     {
       "id": "github:1427561829",
       "importName": "typescript",
-      "commit": "3574327a1fb9d864586d89360f33b6fa3fa5b511"
+      "commit": "470f9cd6a5e662473f6018c50d3f61a03c301563"
     },
     {
       "id": "github:1455223370",
@@ -40,7 +40,7 @@
     {
       "id": "github:1434954468",
       "importName": "forebay-library",
-      "commit": "6d2328f6b66adeb08e18a370af537919b663135c"
+      "commit": "a72e102960f3e389445211e4cd66b92de4d3d269"
     },
     {
       "id": "github:1434914426",
