@@ -11,17 +11,17 @@ capability by id through its context, and reads its settings and writes its log 
 - `src/plugin.ts`: activation; listens where `routing.port` answers for the `proxy.port` setting, and on a failed
   listen is refused with `routing.port`'s own refusal, which the run publishes as the plugin's refusal.
 - `src/serve.ts`: one request: `routing.arrival`, then `anthropic.route_request`; the model routes are answered from
-  `routing.model_entries` and `anthropic.model_listing` or `model_lookup`, a messages body is decoded by
-  `anthropic.decode_request`, and every other request is walked as a pass-through.
+  the catalog's entries, which `routing.catalog_read` answers, and `anthropic.model_listing` or `model_lookup`, a
+  messages body is decoded by `anthropic.decode_request`, and every other request is walked as a pass-through with
+  the key headers the route names.
 - `src/walk.ts`: the loop, `routing.step` until it answers done, performing each step and reporting how it went.
 - `src/relay.ts`: a provider's stream through `anthropic.stream_encode`, one encoder per provider, and the error event
   C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
   offers one, a client going away included.
 - `src/pass-through.ts`: `routing.pass_through` and `reply_headers`, and `routing.failure` for an unreachable upstream.
-- `src/catalog.ts`: the providers' models, kept as `routing.catalog` decides each event (every request's read, a step
-  finding no model, the period, an answer, a round closing, a failed derivation); it holds the timer, the asks, the
-  models and the facts of the rounds, a newer round superseding an open one, and the model map `routing.model_map`
-  derives.
+- `src/catalog.ts`: the providers' models, kept by forebay-library's catalog object, which holds the rounds and the
+  models; it reports each event through `routing.catalog_event`, performs the asks and sets the timers C names, parks
+  each request on the round C names, and reads the entries through `routing.catalog_read`.
 - `src/settings.ts`: each setting whole through `weivel.config`'s `get_tree`, and the settings file C names to the
   user from its `settings_file`.
 - `src/zone.ts`: the machine's zone offset and short name at an instant, from `Intl`, which C names a reset in.
