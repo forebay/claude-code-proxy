@@ -425,6 +425,17 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(upstream.received[0]).toMatchObject({ method: "POST", url: "/v1/messages", body: MESSAGES });
   }, RUN_BOUND);
 
+  it("with no provider installed, sends a messages request upstream without a placeholder x-api-key", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port)]);
+
+    const answer = await sent(port, { path: "/v1/messages", headers: { "x-api-key": "Bearer sk-ant-loader-proxy" }, body: MESSAGES });
+
+    expect(answer.status, answer.body).toBe(200);
+    expect(upstream.received).toHaveLength(1);
+    expect(upstream.received[0]?.headers["x-api-key"]).toBeUndefined();
+  }, RUN_BOUND);
+
   it("lists the providers' models and answers health locally", async () => {
     const port = await freePort();
     await started([proxyInstall(port), providerInstall("alpha", "plain")]);
