@@ -438,6 +438,16 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
     expect(upstream.received).toHaveLength(0);
   }, RUN_BOUND);
 
+  it("answers C's 404 for a model id whose escape is malformed", async () => {
+    const port = await freePort();
+    await started([proxyInstall(port), providerInstall("alpha", "plain")]);
+
+    const looked = await sent(port, { method: "GET", path: "/v1/models/%E0%A4" });
+
+    expect(looked.status, looked.body).toBe(404);
+    expect(JSON.parse(looked.body)).toMatchObject({ type: "error", error: { type: "not_found_error" } });
+  }, RUN_BOUND);
+
   it("refuses its activation in C's words when the port is already taken", async () => {
     const port = await freePort();
     await blocked(port);

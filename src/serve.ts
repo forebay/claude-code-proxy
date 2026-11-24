@@ -46,10 +46,20 @@ async function answeredArrival(proxy: Proxy, incoming: IncomingMessage, response
   return false;
 }
 
+/** The model id a lookup names, or the raw id when its escapes are malformed, which C then answers as unknown. */
+function modelIdOf(lookup: string): string {
+  try {
+    return decodeURIComponent(lookup);
+  } catch (error) {
+    if (error instanceof URIError) return lookup;
+    throw error;
+  }
+}
+
 async function models(proxy: Proxy, response: ServerResponse, lookup: string | undefined): Promise<void> {
   const { entries } = await proxy.catalog.current();
   if (lookup === undefined) written(response, await proxy.anthropic.model_listing({ argument: { models: entries } }));
-  else written(response, await proxy.anthropic.model_lookup({ argument: { models: entries, id: decodeURIComponent(lookup) } }));
+  else written(response, await proxy.anthropic.model_lookup({ argument: { models: entries, id: modelIdOf(lookup) } }));
 }
 
 /** The request as the walk takes it, or undefined once C's decode answered a reply of its own. */
