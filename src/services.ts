@@ -263,3 +263,44 @@ export interface Config {
 export interface Log {
   write(input: { level: number; message: string }): Promise<void>;
 }
+
+type Entries<Name extends string> = Readonly<Record<Name, number>>;
+
+/**
+ * The enums this plugin reads, by the names forebay-library's, the standard's and the core's headers spell them. Only
+ * the names are written here: the numbers are the descriptions', which the plugin's context answers.
+ */
+export interface RoutingEnums {
+  readonly forebay_arrival_kind: Entries<"FOREBAY_ARRIVAL_HEALTH" | "FOREBAY_ARRIVAL_REFUSE">;
+  readonly forebay_step_kind: Entries<"FOREBAY_STEP_PASS_THROUGH" | "FOREBAY_STEP_REFRESH_MODELS" | "FOREBAY_STEP_CALL_PROVIDER" | "FOREBAY_STEP_REPLY" | "FOREBAY_STEP_END_STREAM" | "FOREBAY_STEP_DONE">;
+  readonly forebay_report_kind: Entries<"FOREBAY_REPORT_RESPONSE" | "FOREBAY_REPORT_STREAMED" | "FOREBAY_REPORT_STREAM_FAILED" | "FOREBAY_REPORT_THROWN" | "FOREBAY_REPORT_FAILURE">;
+  readonly forebay_reply_kind: Entries<"FOREBAY_REPLY_PROVIDER_FAILURE" | "FOREBAY_REPLY_RATE_LIMITED">;
+  readonly forebay_failure_reason: Entries<"FOREBAY_UPSTREAM_UNREACHABLE" | "FOREBAY_REQUEST_FAILED">;
+  readonly forebay_log_level: Entries<"FOREBAY_LOG_WARN">;
+  readonly forebay_catalog_event_kind: Entries<"FOREBAY_CATALOG_READ" | "FOREBAY_CATALOG_NO_MODEL" | "FOREBAY_CATALOG_ANSWERED" | "FOREBAY_CATALOG_TIMER">;
+  readonly forebay_catalog_timer_kind: Entries<"FOREBAY_CATALOG_PERIOD">;
+  readonly forebay_catalog_timer_change: Entries<"FOREBAY_CATALOG_SET">;
+  readonly weivel_status: Entries<"WEIVEL_STATUS_OUT_OF_MEMORY">;
+}
+
+export interface AnthropicEnums {
+  readonly forebay_anthropic_route_kind: Entries<"FOREBAY_ANTHROPIC_ROUTE_MESSAGES" | "FOREBAY_ANTHROPIC_ROUTE_MODEL_LIST" | "FOREBAY_ANTHROPIC_ROUTE_MODEL_LOOKUP">;
+  readonly forebay_ir_event_kind: Entries<"FOREBAY_IR_EVENT_ERROR">;
+}
+
+export interface ProviderEnums {
+  readonly forebay_provider_handle_kind: Entries<"FOREBAY_PROVIDER_HANDLE_RESPONSE" | "FOREBAY_PROVIDER_HANDLE_FAILURE" | "FOREBAY_PROVIDER_HANDLE_STREAM" | "FOREBAY_PROVIDER_HANDLE_THROWN">;
+  readonly forebay_provider_next_kind: Entries<"FOREBAY_PROVIDER_NEXT_EVENT" | "FOREBAY_PROVIDER_NEXT_END" | "FOREBAY_PROVIDER_NEXT_FAILURE">;
+}
+
+export interface LogEnums {
+  readonly weivel_standard_log_level: Entries<"WEIVEL_STANDARD_LOG_INFO" | "WEIVEL_STANDARD_LOG_WARN">;
+}
+
+/** Each enum by the definition or contract whose description carries it. */
+export interface Enums {
+  readonly routing: RoutingEnums;
+  readonly anthropic: AnthropicEnums;
+  readonly provider: ProviderEnums;
+  readonly log: LogEnums;
+}

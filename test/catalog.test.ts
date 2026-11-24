@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Catalog } from "../src/catalog.js";
-import type { CatalogEventAnswer, LogLine, Provider, Routing, RoutingProfile } from "../src/services.js";
+import type { CatalogEventAnswer, LogLine, Provider, Routing, RoutingEnums, RoutingProfile } from "../src/services.js";
 
 interface Pending {
   resolve(answer: CatalogEventAnswer): void;
@@ -24,11 +24,22 @@ function heldRouting(pending: Pending[], handleReleases: { count: number }): Rou
   } as unknown as Routing;
 }
 
+/** The fake routing's own enums, which its answers are written in. */
+const ENUMS: RoutingEnums = {
+  forebay_catalog_event_kind: { FOREBAY_CATALOG_READ: 1, FOREBAY_CATALOG_NO_MODEL: 2, FOREBAY_CATALOG_ANSWERED: 3, FOREBAY_CATALOG_TIMER: 4 },
+  forebay_catalog_timer_kind: { FOREBAY_CATALOG_PERIOD: 2 },
+  forebay_catalog_timer_change: { FOREBAY_CATALOG_SET: 1 },
+  forebay_log_level: { FOREBAY_LOG_WARN: 2 },
+  weivel_status: { WEIVEL_STATUS_OUT_OF_MEMORY: 4 },
+} as Partial<RoutingEnums> as RoutingEnums;
+
+const ROUND_CLOSE = 1;
+
 const ASKING_ANSWER: CatalogEventAnswer = {
   wait_round: 1,
   ask_round: 1,
   asks: ["implementation-1"],
-  timers: [{ change: 1, kind: 1, round: 1, due: 2_000 }],
+  timers: [{ change: ENUMS.forebay_catalog_timer_change.FOREBAY_CATALOG_SET, kind: ROUND_CLOSE, round: 1, due: 2_000 }],
   released: [],
   log: [],
 };
@@ -45,7 +56,7 @@ describe("the catalog's I/O around its release", () => {
     let asks = 0;
     const provider = { models: async () => ((asks += 1), { provider: { provider: "alpha" } }) } as unknown as Provider;
     const logged: LogLine[] = [];
-    const catalog = await Catalog.opened({ providers: () => [provider], routing: heldRouting(pending, handleReleases), profile: {} as RoutingProfile, settings: {}, writeLog: (lines) => logged.push(...lines), now: () => 0 });
+    const catalog = await Catalog.opened({ providers: () => [provider], routing: heldRouting(pending, handleReleases), enums: ENUMS, profile: {} as RoutingProfile, settings: {}, writeLog: (lines) => logged.push(...lines), now: () => 0 });
 
     const reading = catalog.current();
     catalog.release();

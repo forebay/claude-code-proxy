@@ -1,5 +1,4 @@
-import { CATALOG_EVENT, CATALOG_TIMER, CATALOG_TIMER_CHANGE, LOG_LEVEL, STATUS } from "./kinds.js";
-import type { CatalogEventAnswer, CatalogEventArgument, CatalogModel, CatalogProvider, CatalogTimer, Handle, LogLine, Provider, Routing, RoutingProfile, Slot } from "./services.js";
+import type { CatalogEventAnswer, CatalogEventArgument, CatalogModel, CatalogProvider, CatalogTimer, Handle, LogLine, Provider, Routing, RoutingEnums, RoutingProfile, Slot } from "./services.js";
 
 /** What routing reads of the providers as the catalog stands. */
 export interface Snapshot {
@@ -13,6 +12,7 @@ export interface Snapshot {
 export interface CatalogOptions {
   readonly providers: () => Provider[];
   readonly routing: Routing;
+  readonly enums: RoutingEnums;
   readonly profile: RoutingProfile;
   readonly settings: unknown;
   readonly writeLog: (lines: readonly LogLine[]) => void;
@@ -27,8 +27,8 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isOutOfMemory(error: unknown): boolean {
-  return (error as { status?: unknown }).status === STATUS.OUT_OF_MEMORY;
+function isOutOfMemory(error: unknown, enums: RoutingEnums): boolean {
+  return (error as { status?: unknown }).status === enums.weivel_status.WEIVEL_STATUS_OUT_OF_MEMORY;
 }
 
 function timerKey(kind: number, round: number): string {
@@ -63,13 +63,13 @@ export class Catalog {
 
   /** The snapshot a request reads, once it reported READ and waited on the round C named. */
   async current(): Promise<Snapshot> {
-    await this.#requested(CATALOG_EVENT.READ);
+    await this.#requested(this.#options.enums.forebay_catalog_event_kind.FOREBAY_CATALOG_READ);
     return this.#read();
   }
 
   /** The snapshot after a step found no model, once it reported NO_MODEL and waited on the round C named. */
   async refreshed(): Promise<Snapshot> {
-    await this.#requested(CATALOG_EVENT.NO_MODEL);
+    await this.#requested(this.#options.enums.forebay_catalog_event_kind.FOREBAY_CATALOG_NO_MODEL);
     return this.#read();
   }
 
@@ -157,7 +157,7 @@ export class Catalog {
       const key = timerKey(kind, round);
       clearTimeout(this.#timers.get(key));
       this.#timers.delete(key);
-      if (change !== CATALOG_TIMER_CHANGE.SET) continue;
+      if (change !== this.#options.enums.forebay_catalog_timer_change.FOREBAY_CATALOG_SET) continue;
       const timer = setTimeout(() => {
         this.#timers.delete(key);
         void this.#fired(kind, round);
@@ -173,13 +173,13 @@ export class Catalog {
    */
   async #fired(kind: number, round: number): Promise<void> {
     if (this.#released) return;
-    const facts = kind === CATALOG_TIMER.PERIOD ? { implementations: this.#offered() } : {};
+    const facts = kind === this.#options.enums.forebay_catalog_timer_kind.FOREBAY_CATALOG_PERIOD ? { implementations: this.#offered() } : {};
     let answer: CatalogEventAnswer;
     try {
-      answer = await this.#event({ kind: CATALOG_EVENT.TIMER, timer: kind, round, ...facts });
+      answer = await this.#event({ kind: this.#options.enums.forebay_catalog_event_kind.FOREBAY_CATALOG_TIMER, timer: kind, round, ...facts });
     } catch (error) {
       this.#warn(error);
-      if (isOutOfMemory(error)) setImmediate(() => void this.#fired(kind, round));
+      if (isOutOfMemory(error, this.#options.enums)) setImmediate(() => void this.#fired(kind, round));
       return;
     }
     if (!this.#released) this.#acted(answer);
@@ -190,9 +190,9 @@ export class Catalog {
     let facts: EventFacts;
     try {
       const { provider } = await this.#byName.get(implementation)!.models({});
-      facts = { kind: CATALOG_EVENT.ANSWERED, round, implementation, models: provider };
+      facts = { kind: this.#options.enums.forebay_catalog_event_kind.FOREBAY_CATALOG_ANSWERED, round, implementation, models: provider };
     } catch (error) {
-      facts = { kind: CATALOG_EVENT.ANSWERED, round, implementation, failed: 1, message: messageOf(error) };
+      facts = { kind: this.#options.enums.forebay_catalog_event_kind.FOREBAY_CATALOG_ANSWERED, round, implementation, failed: 1, message: messageOf(error) };
     }
     if (this.#released) return;
     let answer: CatalogEventAnswer;
@@ -207,7 +207,7 @@ export class Catalog {
 
   #warn(error: unknown): void {
     try {
-      this.#options.writeLog([{ level: LOG_LEVEL.WARN, message: messageOf(error) }]);
+      this.#options.writeLog([{ level: this.#options.enums.forebay_log_level.FOREBAY_LOG_WARN, message: messageOf(error) }]);
     } catch {
       // A warning that cannot be written must not turn a handled refusal into an unhandled rejection.
     }

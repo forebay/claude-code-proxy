@@ -1,11 +1,11 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { FAILURE_REASON } from "./kinds.js";
-import type { Anthropic, LogLine, Pair, Routing } from "./services.js";
+import type { Anthropic, LogLine, Pair, Routing, RoutingEnums } from "./services.js";
 import { headersOf, pairsOf, writeBody } from "./wire.js";
 
 export interface PassThrough {
   readonly routing: Routing;
+  readonly enums: RoutingEnums;
   readonly anthropic: Anthropic;
   readonly upstream: unknown;
   readonly placeholderAuthorization: unknown;
@@ -26,7 +26,7 @@ function sent(target: string, method: string, headers: readonly Pair[], body: Bu
 }
 
 async function unreachable(through: PassThrough, response: ServerResponse, error: Error): Promise<void> {
-  const failure = await through.routing.failure({ argument: { reason: FAILURE_REASON.UPSTREAM_UNREACHABLE, upstream: through.upstream, detail: error.message } });
+  const failure = await through.routing.failure({ argument: { reason: through.enums.forebay_failure_reason.FOREBAY_UPSTREAM_UNREACHABLE, upstream: through.upstream, detail: error.message } });
   through.writeLog(failure.log);
   const body = await through.anthropic.error_envelope({ argument: { reply_kind: failure.reply_kind, message: failure.message } });
   writeBody(response, failure.status, body.headers, body.bytes);

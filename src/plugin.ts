@@ -1,9 +1,8 @@
 import { createServer, type Server } from "node:http";
-import type { PluginContext } from "@weivel/typescript/context";
+import type { DescribedEnums, PluginContext } from "@weivel/typescript/context";
 import { Catalog } from "./catalog.js";
-import { LOG_LEVEL, WEIVEL_LOG } from "./kinds.js";
 import { serve, type Proxy } from "./serve.js";
-import type { Anthropic, Config, Log, LogLine, Provider, Routing } from "./services.js";
+import type { Anthropic, Config, Enums, Log, LogLine, Provider, Routing } from "./services.js";
 import { readSettings, type ProxySettings } from "./settings.js";
 
 const PROVIDER_CAPABILITY = "forebay.provider";
@@ -19,10 +18,18 @@ function required<Service>(context: PluginContext, id: string): Service {
   return service;
 }
 
-function logWriter(log: Log): (lines: readonly LogLine[]) => void {
+/** The enums a description carries, read as the names this plugin reads of them. */
+function described<Read>(enums: DescribedEnums | undefined, of: string): Read {
+  if (enums === undefined) throw new Error(`claude-code-proxy reads the enums of ${of}, and no description carries them`);
+  return enums as unknown as Read;
+}
+
+function logWriter(log: Log, enums: Enums): (lines: readonly LogLine[]) => void {
+  const { FOREBAY_LOG_WARN } = enums.routing.forebay_log_level;
+  const { WEIVEL_STANDARD_LOG_INFO, WEIVEL_STANDARD_LOG_WARN } = enums.log.weivel_standard_log_level;
   return (lines) => {
     for (const line of lines) {
-      void log.write({ level: line.level === LOG_LEVEL.WARN ? WEIVEL_LOG.WARN : WEIVEL_LOG.INFO, message: line.message }).catch(() => undefined);
+      void log.write({ level: line.level === FOREBAY_LOG_WARN ? WEIVEL_STANDARD_LOG_WARN : WEIVEL_STANDARD_LOG_INFO, message: line.message }).catch(() => undefined);
     }
   };
 }
@@ -63,11 +70,19 @@ async function started(context: PluginContext): Promise<Running> {
   const routing = required<Routing>(context, "routing");
   const anthropic = required<Anthropic>(context, "anthropic");
   const settings = await readSettings(required<Config>(context, "weivel.config"));
-  const writeLog = logWriter(required<Log>(context, "weivel.log"));
+  const log = required<Log>(context, "weivel.log");
+  const providerType = context.capability<Provider>(PROVIDER_CAPABILITY);
+  const enums: Enums = {
+    routing: described(context.services.enumsOf(routing), "routing"),
+    anthropic: described(context.services.enumsOf(anthropic), "anthropic"),
+    provider: described(context.capabilities.enumsOf(providerType), PROVIDER_CAPABILITY),
+    log: described(context.services.enumsOf(log), "weivel.log"),
+  };
+  const writeLog = logWriter(log, enums);
   const limits = await routing.limits({});
-  const providers = (): Provider[] => context.capabilities.all(context.capability<Provider>(PROVIDER_CAPABILITY));
-  const catalog = await Catalog.opened({ providers, routing, profile: settings.profile, settings: settings.record, writeLog, now: Date.now });
-  const proxy: { -readonly [Key in keyof Proxy]: Proxy[Key] } = { routing, anthropic, settings, port: 0, limits, catalog, writeLog };
+  const providers = (): Provider[] => context.capabilities.all(providerType);
+  const catalog = await Catalog.opened({ providers, routing, enums: enums.routing, profile: settings.profile, settings: settings.record, writeLog, now: Date.now });
+  const proxy: { -readonly [Key in keyof Proxy]: Proxy[Key] } = { routing, anthropic, enums, settings, port: 0, limits, catalog, writeLog };
   const server = createServer((incoming, response) => void serve(proxy, incoming, response));
   try {
     proxy.port = await listening(routing, settings, server);
