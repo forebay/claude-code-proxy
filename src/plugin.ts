@@ -1,8 +1,8 @@
 import { createServer, type Server } from "node:http";
-import type { DescribedEnums, PluginContext } from "@weivel/typescript/context";
+import type { PluginContext } from "@weivel/typescript/context";
 import { Catalog } from "./catalog.js";
 import { serve, type Proxy } from "./serve.js";
-import type { Anthropic, Config, Enums, Log, LogLine, Provider, Routing } from "./services.js";
+import { ANTHROPIC_ENUM_NAMES, LOG_ENUM_NAMES, PROVIDER_ENUM_NAMES, ROUTING_ENUM_NAMES, type Anthropic, type Config, type Enums, type Log, type LogLine, type Provider, type Routing } from "./services.js";
 import { readSettings, type ProxySettings } from "./settings.js";
 
 const PROVIDER_CAPABILITY = "forebay.provider";
@@ -18,10 +18,21 @@ function required<Service>(context: PluginContext, id: string): Service {
   return service;
 }
 
-/** The enums a description carries, read as the names this plugin reads of them. */
-function described<Read>(enums: DescribedEnums | undefined, of: string): Read {
-  if (enums === undefined) throw new Error(`claude-code-proxy reads the enums of ${of}, and no description carries them`);
-  return enums as unknown as Read;
+/**
+ * Every enum entry this plugin reads, from the descriptions of what it reaches, refusing the activation when one lacks a
+ * name it reads.
+ *
+ * @implNote They are read once, at the activation, which holds because a header's enums are append-only: an entry never
+ * changes its number while the plugin runs.
+ */
+function enumsOf(context: PluginContext, reached: { routing: Routing; anthropic: Anthropic; log: Log }): Enums {
+  const { services, capabilities } = context;
+  return {
+    routing: context.requireEnums(services.enumsOf(reached.routing), ROUTING_ENUM_NAMES, "routing"),
+    anthropic: context.requireEnums(services.enumsOf(reached.anthropic), ANTHROPIC_ENUM_NAMES, "anthropic"),
+    provider: context.requireEnums(capabilities.enumsOf(context.capability(PROVIDER_CAPABILITY)), PROVIDER_ENUM_NAMES, PROVIDER_CAPABILITY),
+    log: context.requireEnums(services.enumsOf(reached.log), LOG_ENUM_NAMES, "weivel.log"),
+  };
 }
 
 function logWriter(log: Log, enums: Enums): (lines: readonly LogLine[]) => void {
@@ -69,15 +80,10 @@ async function listening(routing: Routing, settings: ProxySettings, server: Serv
 async function started(context: PluginContext): Promise<Running> {
   const routing = required<Routing>(context, "routing");
   const anthropic = required<Anthropic>(context, "anthropic");
-  const settings = await readSettings(required<Config>(context, "weivel.config"));
   const log = required<Log>(context, "weivel.log");
+  const enums = enumsOf(context, { routing, anthropic, log });
+  const settings = await readSettings(required<Config>(context, "weivel.config"));
   const providerType = context.capability<Provider>(PROVIDER_CAPABILITY);
-  const enums: Enums = {
-    routing: described(context.services.enumsOf(routing), "routing"),
-    anthropic: described(context.services.enumsOf(anthropic), "anthropic"),
-    provider: described(context.capabilities.enumsOf(providerType), PROVIDER_CAPABILITY),
-    log: described(context.services.enumsOf(log), "weivel.log"),
-  };
   const writeLog = logWriter(log, enums);
   const limits = await routing.limits({});
   const providers = (): Provider[] => context.capabilities.all(providerType);

@@ -27,19 +27,17 @@ function heldRouting(pending: Pending[], handleReleases: { count: number }): Rou
 /** The fake routing's own enums, which its answers are written in. */
 const ENUMS: RoutingEnums = {
   forebay_catalog_event_kind: { FOREBAY_CATALOG_READ: 1, FOREBAY_CATALOG_NO_MODEL: 2, FOREBAY_CATALOG_ANSWERED: 3, FOREBAY_CATALOG_TIMER: 4 },
-  forebay_catalog_timer_kind: { FOREBAY_CATALOG_PERIOD: 2 },
+  forebay_catalog_timer_kind: { FOREBAY_CATALOG_ROUND_CLOSE: 1, FOREBAY_CATALOG_PERIOD: 2 },
   forebay_catalog_timer_change: { FOREBAY_CATALOG_SET: 1 },
   forebay_log_level: { FOREBAY_LOG_WARN: 2 },
   weivel_status: { WEIVEL_STATUS_OUT_OF_MEMORY: 4 },
 } as Partial<RoutingEnums> as RoutingEnums;
 
-const ROUND_CLOSE = 1;
-
 const ASKING_ANSWER: CatalogEventAnswer = {
   wait_round: 1,
   ask_round: 1,
   asks: ["implementation-1"],
-  timers: [{ change: ENUMS.forebay_catalog_timer_change.FOREBAY_CATALOG_SET, kind: ROUND_CLOSE, round: 1, due: 2_000 }],
+  timers: [{ change: ENUMS.forebay_catalog_timer_change.FOREBAY_CATALOG_SET, kind: ENUMS.forebay_catalog_timer_kind.FOREBAY_CATALOG_ROUND_CLOSE, round: 1, due: 2_000 }],
   released: [],
   log: [],
 };
