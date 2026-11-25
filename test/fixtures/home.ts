@@ -1,6 +1,8 @@
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { bundlePlugin } from "@weivel/typescript/bundle";
-import { scratchHome, type PlacedLibrary, type ScratchFile } from "@weivel/typescript/testing";
+import type { BoundDefinition } from "@weivel/typescript/host";
+import { describedLibrary, scratchHome, setVariables, type DescribedLibrary, type PlacedLibrary } from "@weivel/typescript/testing";
 
 export const REPOSITORY = resolve(import.meta.dirname, "..", "..");
 export const HOST_ID = "test-host";
@@ -14,71 +16,76 @@ export interface Install {
   readonly settings: Record<string, unknown>;
 }
 
+/** Where runtime-testing placed one install: its version folder and the file its settings are read from. */
+export interface PlacedInstall {
+  readonly id: string;
+  readonly bundle: string;
+  readonly settings_file: string;
+}
+
 export interface Home {
   readonly base: string;
   readonly runtime: string;
+  readonly installs: readonly PlacedInstall[];
   /** Puts the process's places back as they were and deletes the home. */
   remove(): void;
 }
 
-function places(base: string): Record<string, string> {
-  return {
-    SPISOR_HOME: join(base, "portable"),
-    SPISOR_STATE: join(base, "state"),
-    SPISOR_CACHE: join(base, "cache"),
-    SPISOR_SECRETS: join(base, "secrets"),
-    HOME: join(base, "user"),
-    USERPROFILE: join(base, "user"),
+interface LaidOutHome {
+  readonly variables: readonly { readonly name: string; readonly value: string }[];
+  readonly installs: readonly PlacedInstall[];
+}
+
+let runtimeTesting: DescribedLibrary | undefined;
+
+/** runtime-testing's service, the test-only C library that lays a home out through runtime's own writers, loaded once. */
+function testingService(): BoundDefinition {
+  runtimeTesting ??= describedLibrary(join(NATIVE, "runtime_testing"));
+  return runtimeTesting.described.get("runtime.testing")!;
+}
+
+function hintedLibrary(id: string, placed: PlacedLibrary): Record<string, unknown> {
+  return { id, version: null, directory: placed.directory, binary: placed.binary };
+}
+
+function layOutHome(base: string, libraries: Readonly<Record<string, PlacedLibrary>>, installs: readonly Install[]): Promise<LaidOutHome> {
+  const argument = {
+    base,
+    host_id: HOST_ID,
+    installs: installs.map((install) => ({ manifest: install.manifest, entry_source: install.bundle, settings: install.settings })),
+    libraries: [hintedLibrary("runtime", libraries.runtime!), hintedLibrary("forebay-library", libraries.forebay_library!)],
+    holder: process.pid,
   };
-}
-
-function installFiles(base: string, install: Install): ScratchFile[] {
-  const { id, version, entry } = install.manifest;
-  const bundle = join(base, "cache", "bundles", id, version);
-  return [
-    { path: join(bundle, "plugin.json"), content: install.manifest },
-    { path: join(bundle, entry), copyFrom: install.bundle },
-    { path: join(bundle, ".installed.json"), content: { files: {} } },
-    { path: join(base, "application", "config", `${id}.json`), content: install.settings },
-  ];
-}
-
-function homeFiles(base: string, libraries: Readonly<Record<string, PlacedLibrary>>, installs: readonly Install[]): ScratchFile[] {
-  const enabled = Object.fromEntries(installs.map((install) => [install.manifest.id, { enabled: true }]));
-  const catalog = join(base, "catalog", "index.json");
-  return [
-    { path: catalog, content: { format: 1, items: {} } },
-    { path: join(base, "state", "hosts", `${HOST_ID}.json`), content: { id: HOST_ID, kind: "host", version: "1.0.0", home: join(base, "application") } },
-    { path: join(base, "state", "processes", `${HOST_ID}.json`), content: { pid: null, holders: [process.pid] } },
-    {
-      path: join(base, "cache", "hosts", "javascript-host.json"),
-      content: {
-        host: "2.0.0",
-        libraries: {
-          runtime: { version: "0.2.0", ...libraries.runtime },
-          koffi: { version: "2.0.0", directory: join(base, "koffi") },
-          "forebay-library": { version: "0.2.0", ...libraries.forebay_library },
-        },
-      },
-    },
-    ...installs.flatMap((install) => installFiles(base, install)),
-    { path: join(base, "application", "config", "settings.json"), content: { plugins: enabled, catalog: { sources: [{ kind: "local", path: catalog }] } } },
-  ];
+  return testingService().lay_out_home!({ argument }) as Promise<LaidOutHome>;
 }
 
 /**
- * Lays out a fresh home under the temporary directory, as an install leaves one: the registered loader `test-host`,
- * the javascript-host's hint naming runtime and forebay-library, every install enabled, and this process recorded as
- * the loader's holder, so a SERVE run keeps running. The process's places point into it until `remove`.
+ * Lays out a fresh home under the temporary directory through runtime-testing, as an install leaves one: the
+ * registered loader `test-host`, the javascript-host's hint naming runtime and forebay-library, every install enabled,
+ * and this process recorded as the loader's holder, so a SERVE run keeps running. The process's places point into it
+ * until `remove`.
  */
-export function homeWith(installs: readonly Install[]): Home {
-  const home = scratchHome({
+export async function homeWith(installs: readonly Install[]): Promise<Home> {
+  const scratch = scratchHome({
     prefix: "ccp-home-",
     libraries: { runtime: join(NATIVE, "runtime"), forebay_library: join(NATIVE, "forebay_library") },
-    environment: places,
-    files: (base, libraries) => homeFiles(base, libraries, installs),
+    environment: () => ({}),
+    files: () => [],
   });
-  return { base: home.base, runtime: home.libraries.runtime!.binary, remove: home.remove };
+  try {
+    const base = join(scratch.base, "home");
+    mkdirSync(base);
+    const laidOut = await layOutHome(base, scratch.libraries, installs);
+    const restore = setVariables(Object.fromEntries(laidOut.variables.map((variable) => [variable.name, variable.value])));
+    const remove = (): void => {
+      restore();
+      scratch.remove();
+    };
+    return { base, runtime: scratch.libraries.runtime!.binary, installs: laidOut.installs, remove };
+  } catch (error) {
+    scratch.remove();
+    throw error;
+  }
 }
 
 /** Bundles a plugin entry into one module, as a plugin's build does, under `directory`. */

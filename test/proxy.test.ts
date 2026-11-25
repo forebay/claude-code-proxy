@@ -128,7 +128,7 @@ function providerInstall(id: string, mode: string, settings: Record<string, unkn
 }
 
 async function started(installs: readonly Install[]): Promise<Running> {
-  const home = homeWith(installs);
+  const home = await homeWith(installs);
   const logged: Logged[] = [];
   const log = {
     debug: (message: string) => logged.push({ level: "debug", message }),
@@ -515,7 +515,7 @@ describe("claude-code-proxy under the host program, over runtime in a temporary 
       refused: expect.stringContaining(`claude-code-proxy is enabled but did not start: its activate threw: port ${port} on 127.0.0.1 is already in use, so the proxy cannot listen; fix: stop what listens on port ${port}`),
       fix: "fix or disable claude-code-proxy",
     });
-    expect(readyRecord(run.home).refused).toContain(`set proxy.port in ${join(run.home.base, "application", "config", "claude-code-proxy.json")} to a free port`);
+    expect(readyRecord(run.home).refused).toContain(`set proxy.port in ${run.home.installs.find((install) => install.id === "claude-code-proxy")!.settings_file} to a free port`);
   }, RUN_BOUND);
 });
 

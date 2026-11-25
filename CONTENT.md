@@ -37,9 +37,10 @@ model pattern, the default limits and the login command the no-model reply names
 
 ## Testing
 
-`npm test` builds forebay-library's `forebay_library` and spisor/library's `runtime` with CMake into `native/`
-(`scripts/native.ts`), builds and type-checks, and runs vitest. `test/proxy.test.ts` lays out a temporary home with
-the four `SPISOR_*` places under it, installs the proxy and the test provider of `test/fixtures/provider/` into it,
+`npm test` builds forebay-library's `forebay_library` and spisor/library's `runtime` and test-only `runtime_testing`
+with CMake into `native/` (`scripts/native.ts`), builds and type-checks, and runs vitest. `test/proxy.test.ts` has
+`runtime_testing` lay out a temporary home through runtime's own writers, the four `SPISOR_*` places under it, and
+install the proxy and the test provider of `test/fixtures/provider/` into it, so the layout has one owner in C; it
 runs `runtime` under weivel/typescript's `startHost` in process, and sends each case as a real HTTP request to the
 listening proxy; `test/fixtures/upstream.ts` is the local upstream a pass-through reaches.
 
