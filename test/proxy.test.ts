@@ -54,7 +54,7 @@ function loggedIn(home: Home): string {
 
 /** The loader's ready record the run published: ready, or the refusal naming the plugin that did not start. */
 function readyRecord(home: Home): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(home.base, "state", "processes", `${HOST_ID}.ready.json`), "utf8"));
+  return JSON.parse(readFileSync(join(home.processes, `${HOST_ID}.ready.json`), "utf8"));
 }
 
 function waited(milliseconds: number): Promise<void> {
@@ -161,7 +161,7 @@ beforeEach(async () => {
 afterAll(() => rmSync(bundles, { recursive: true, force: true }));
 
 afterEach(async () => {
-  for (const run of running.splice(0)) {
+  for (const run of running.splice(0).reverse()) {
     try {
       await run.host.stop();
     } finally {

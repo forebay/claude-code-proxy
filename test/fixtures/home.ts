@@ -27,12 +27,15 @@ export interface Home {
   readonly base: string;
   readonly runtime: string;
   readonly installs: readonly PlacedInstall[];
+  /** The folder the loader's processes record and its ready record are written in. */
+  readonly processes: string;
   /** Puts the process's places back as they were and deletes the home. */
   remove(): void;
 }
 
 interface LaidOutHome {
   readonly variables: readonly { readonly name: string; readonly value: string }[];
+  readonly processes: string;
   readonly installs: readonly PlacedInstall[];
 }
 
@@ -81,7 +84,7 @@ export async function homeWith(installs: readonly Install[]): Promise<Home> {
       restore();
       scratch.remove();
     };
-    return { base, runtime: scratch.libraries.runtime!.binary, installs: laidOut.installs, remove };
+    return { base, runtime: scratch.libraries.runtime!.binary, installs: laidOut.installs, processes: laidOut.processes, remove };
   } catch (error) {
     scratch.remove();
     throw error;
