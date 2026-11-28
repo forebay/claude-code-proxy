@@ -3,6 +3,7 @@
   "importName": "claude-code-proxy",
   "id": "claude-code-proxy",
   "version": "3.0.0",
+  "language": "typescript",
   "entry": "dist/plugin.js",
   "bundle": {
     "entry": "src/plugin.ts"

@@ -6,6 +6,7 @@ import { describedLibrary, scratchHome, setVariables, type DescribedLibrary, typ
 
 export const REPOSITORY = resolve(import.meta.dirname, "..", "..");
 export const HOST_ID = "test-host";
+export const LANGUAGE = "typescript";
 
 const NATIVE = join(REPOSITORY, "native");
 
@@ -58,13 +59,14 @@ function layOutHome(base: string, libraries: Readonly<Record<string, PlacedLibra
     installs: installs.map((install) => ({ manifest: install.manifest, entry_source: install.bundle, settings: install.settings })),
     libraries: [hintedLibrary("runtime", libraries.runtime!), hintedLibrary("forebay-library", libraries.forebay_library!)],
     holder: process.pid,
+    layers: [{ language: LANGUAGE, runtime: "javascript" }],
   };
   return testingService().lay_out_home!({ argument }) as Promise<LaidOutHome>;
 }
 
 /**
  * Lays out a fresh home under the temporary directory through runtime-testing, as an install leaves one: the
- * registered loader `test-host`, the javascript-host's hint naming runtime and forebay-library, every install enabled,
+ * registered loader `test-host`, the typescript-host's hint naming runtime and forebay-library, every install enabled,
  * and this process recorded as the loader's holder, so a SERVE run keeps running. The process's places point into it
  * until `remove`.
  */

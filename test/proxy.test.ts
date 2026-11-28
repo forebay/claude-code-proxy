@@ -6,7 +6,7 @@ import { startHost, type RunningHost } from "@weivel/typescript/program";
 import { freePort } from "@weivel/typescript/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { abandonedAfterFirstBytes, pending, sent, type Answer } from "./fixtures/client.js";
-import { bundled, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { bundled, homeWith, HOST_ID, LANGUAGE, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -119,6 +119,7 @@ function providerInstall(id: string, mode: string, settings: Record<string, unkn
     importName: id,
     id,
     version: "1.0.0",
+    language: LANGUAGE,
     entry: "index.js",
     capabilities: { provides: ["forebay.provider"] },
     services: { consumes: ["weivel.config"], provides: [`${id}:probe`] },
@@ -136,7 +137,7 @@ async function started(installs: readonly Install[]): Promise<Running> {
     warn: (message: string) => logged.push({ level: "warn", message }),
     error: (message: string) => logged.push({ level: "error", message }),
   };
-  const host = await startHost({ hostLibraryPath: home.runtime, arguments: [HOST_ID], log });
+  const host = await startHost({ hostLibraryPath: home.runtime, arguments: [LANGUAGE, HOST_ID], log });
   const run = { home, host, logged };
   running.push(run);
   return run;
